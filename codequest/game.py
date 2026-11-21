@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 import ctypes
-import json
+import os
 import sys
 from collections.abc import Callable
 from typing import Any
 
 import pygame
 
-from .assets import APP_TITLE, TILE, Assets, load_logo, load_logo_icon, user_data_dir
+from .assets import (
+    APP_TITLE,
+    TILE,
+    Assets,
+    backup_dir,
+    load_logo,
+    load_logo_icon,
+    user_data_dir,
+)
 from .display import VIEWPORT, mouse_pos, to_logical_event
 from .editor import CodeEditor
 from .engine import MAX_HERO_HP, Level, RunResult, World, requirement_label, run_code
 from .levels import STAGES, WORLDS, all_levels, world_of
+from .progress import Progress
 from .theory import THEORY
 from .theory_view import TheoryView
 
@@ -109,23 +118,6 @@ class Button:
         pygame.draw.rect(surface, (255, 255, 255, 40), self.rect, width=1, border_radius=8)
         label = font.render(self.label, True, COLOR_TEXT)
         surface.blit(label, label.get_rect(center=self.rect.center))
-
-
-class Progress:
-    def __init__(self) -> None:
-        self.completed: set[str] = set()
-        self.code: dict[str, str] = {}
-        if PROGRESS_FILE.exists():
-            try:
-                data = json.loads(PROGRESS_FILE.read_text(encoding="utf-8"))
-                self.completed = set(data.get("completed", []))
-                self.code = dict(data.get("code", {}))
-            except (OSError, ValueError):
-                pass
-
-    def save(self) -> None:
-        data = {"completed": sorted(self.completed), "code": self.code}
-        PROGRESS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class Playback:
@@ -347,8 +339,8 @@ class App:
 
         self.assets = Assets()
         self.logo = load_logo(96)
-        self.progress = Progress()
-        self.editor = CodeEditor(self.font_code)
+        self.progress = Progress(PROGRESS_FILE, backup_dir())
+        self.editor = CodeEditor(self.font_code, self.font_small)
         self.levels = all_levels()
         self.scene = "menu"
         self.level: Level = self.levels[0]
@@ -365,6 +357,13 @@ class App:
         self.play_buttons: list[Button] = []
         self.win_buttons: list[Button] = []
         self.menu_stage = self._first_unfinished_stage()
+        self.menu_tool_buttons = [
+            Button(pygame.Rect(1020, 30, 196, 36), "Sao lưu tiến độ", self.backup_progress, (46, 120, 90)),
+            Button(pygame.Rect(1020, 72, 196, 36), "Khôi phục tiến độ", self.restore_progress, (90, 80, 140)),
+        ]
+        self.toast: tuple[str, float] | None = None
+        if self.progress.restored_from_backup:
+            self.show_toast("Đã tự khôi phục tiến độ từ bản sao lưu trong Documents.")
         self._build_menu()
 
     # ------------------------------------------------------------ scenes
@@ -381,6 +380,34 @@ class App:
     def select_stage(self, stage_number: int) -> None:
         self.menu_stage = stage_number
         self._build_menu()
+
+    def show_toast(self, text: str, seconds: float = 5.0) -> None:
+        self.toast = (text, seconds)
+
+    def backup_progress(self) -> None:
+        self.save_code()
+        try:
+            path = self.progress.export_backup()
+        except OSError as error:
+            self.show_toast(f"Không sao lưu được: {error}")
+            return
+        if path is None:
+            self.show_toast("Bản chạy thử từ mã nguồn: tiến độ nằm ở progress.json trong thư mục dự án.")
+            return
+        self.show_toast(f"Đã sao lưu vào {path}. Có thể chép file này sang USB / máy khác.", 7.0)
+        try:
+            os.startfile(path.parent)  # type: ignore[attr-defined]
+        except (AttributeError, OSError):
+            pass
+
+    def restore_progress(self) -> None:
+        added = self.progress.restore_backup()
+        if added is None:
+            folder = self.progress.backup_dir or "Documents/OneSpace CodeQuest"
+            self.show_toast(f"Chưa có bản sao lưu. Hãy chép file tien-do.json vào {folder} rồi thử lại.", 7.0)
+            return
+        self._build_menu()
+        self.show_toast(f"Đã khôi phục tiến độ: thêm {added} màn hoàn thành.")
 
     def _build_menu(self) -> None:
         self.menu_buttons = []
@@ -431,6 +458,7 @@ class App:
         self.scene = "play"
         self.playback = Playback(level)
         self.editor.set_text(self.progress.code.get(level.id, level.starter))
+        self.editor.extra_names = list(level.extra_globals)
         self.editor.focused = True
         self.console = []
         self.hint_index = 0
@@ -552,7 +580,7 @@ class App:
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if self.scene == "menu":
-            for button in self.menu_buttons:
+            for button in [*self.menu_buttons, *self.menu_tool_buttons]:
                 if button.handle_event(event):
                     return
             return
@@ -579,6 +607,8 @@ class App:
             self.run()
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            if self.editor.handle_escape():
+                return
             if self.show_theory:
                 self.show_theory = False
             else:
@@ -587,6 +617,9 @@ class App:
         self.editor.handle_event(event)
 
     def update(self, delta_seconds: float) -> None:
+        if self.toast is not None:
+            text, remaining = self.toast
+            self.toast = (text, remaining - delta_seconds) if remaining > delta_seconds else None
         if self.scene != "play":
             return
         self.editor.update(delta_seconds)
@@ -654,6 +687,21 @@ class App:
 
         for button in self.menu_buttons[len(STAGES):]:
             button.draw(self.screen, self.font)
+        for button in self.menu_tool_buttons:
+            button.draw(self.screen, self.font_small)
+        self.draw_toast()
+
+    def draw_toast(self) -> None:
+        if self.toast is None:
+            return
+        lines = wrap_text(self.toast[0], self.font, 900)
+        box = pygame.Rect(0, 0, 940, 20 + 24 * len(lines))
+        box.midbottom = (SCREEN_SIZE[0] // 2, SCREEN_SIZE[1] - 24)
+        pygame.draw.rect(self.screen, (20, 70, 60), box, border_radius=10)
+        pygame.draw.rect(self.screen, COLOR_GOOD, box, width=2, border_radius=10)
+        for index, line in enumerate(lines):
+            rendered = self.font.render(line, True, COLOR_TEXT)
+            self.screen.blit(rendered, (box.x + 20, box.y + 10 + index * 24))
 
     def draw_play(self) -> None:
         world_info = world_of(self.level.id)

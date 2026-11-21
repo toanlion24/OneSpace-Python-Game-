@@ -62,9 +62,17 @@ CÁCH CHƠI
   chỉ có tác dụng trong dấu nháy "..." và ghi chú #.
   Nên TẮT Unikey/EVKey khi chơi để tránh gõ chồng.
 
-LƯU TIẾN ĐỘ
+KHUNG CODE
+- Gõ vài chữ đầu sẽ hiện gợi ý lệnh: Tab hoặc Enter để chọn, Esc để đóng, Ctrl+Space để mở lại.
+- Bôi đen bằng chuột hoặc Shift + mũi tên. Ctrl+A chọn hết, Ctrl+C / Ctrl+X / Ctrl+V copy - cắt - dán,
+  Ctrl+Z hoàn tác. Tab / Shift+Tab thụt lề cả đoạn đã chọn.
+
+LƯU TIẾN ĐỘ (không mất khi cài lại game)
 - Tự lưu vào: %APPDATA%\\OneSpaceCodeQuest\\progress.json
-- Muốn chơi lại từ đầu: xoá file progress.json đó.
+- Bản sao lưu tự động: Documents\\OneSpace CodeQuest\\tien-do.json
+- Đổi máy: ở menu bấm "Sao lưu tiến độ", chép file tien-do.json sang thư mục
+  Documents\\OneSpace CodeQuest của máy mới, rồi bấm "Khôi phục tiến độ".
+- Muốn chơi lại từ đầu: xoá cả hai file trên.
 
 Yêu cầu: Windows 10/11 64-bit. Không cần cài Python.
 Đồ hoạ: bộ Free Simple Platformer Game Kit của CraftPix.net (xem gamekit/License.txt).

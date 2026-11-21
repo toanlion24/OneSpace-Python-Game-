@@ -19,6 +19,7 @@ import traceback
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -3436,6 +3437,330 @@ def to_logical_event(event: pygame.event.Event) -> pygame.event.Event:
 
 
 # ======================================================================
+# completion.py
+# ======================================================================
+
+@dataclass(frozen=True)
+class Suggestion:
+    label: str
+    insert: str
+    hint: str
+    cursor_back: int = 0
+
+
+def _call(name: str, params: str, hint: str) -> Suggestion:
+    """A function/method: inserts `name()` and puts the cursor inside the brackets when it takes arguments."""
+    return Suggestion(f"{name}({params})", f"{name}()", hint, 1 if params else 0)
+
+
+def _plain(name: str, hint: str) -> Suggestion:
+    return Suggestion(name, name, hint)
+
+
+HERO_MEMBERS: list[Suggestion] = [
+    _call("move_right", "steps", "Đi sang phải (mặc định 1 bước)"),
+    _call("move_left", "steps", "Đi sang trái"),
+    _call("move_up", "steps", "Đi lên"),
+    _call("move_down", "steps", "Đi xuống"),
+    _call("move_to", "x, y", "Tự tìm đường tới ô (x, y)"),
+    _call("say", "text", "Hero nói một câu"),
+    _call("look", "direction", "Xem ô bên cạnh: \"right\", \"left\", \"up\", \"down\""),
+    _call("attack", "direction, weapon", "Đánh ô bên cạnh"),
+    _call("attack_target", "x, y, weapon", "Đi tới cạnh quái rồi đánh"),
+    _call("enter_code", "code", "Nhập mật mã cho cửa bên cạnh"),
+    _call("try_code", "code", "Thử mật mã, không mất máu"),
+    _call("open_door", "direction", "Mở cửa kẹt (có thể lỗi DoorJammed)"),
+    _call("find_gems", "", "Danh sách ngọc còn trên bản đồ"),
+    _call("find_enemies", "", "Danh sách quái"),
+    _call("scan", "", "Bản đồ dạng list lồng nhau grid[y][x]"),
+    _call("use", "item", "Dùng vật có thuộc tính power để hồi máu"),
+    _call("move_by", "vector", "Đi theo đối tượng có x, y"),
+    _call("follow", "path", "Đi theo từng hướng trong lộ trình"),
+    _plain("position", "Toạ độ hiện tại (x, y)"),
+    _plain("exit_position", "Toạ độ cổng (x, y)"),
+    _plain("hp", "Số máu hiện tại"),
+    _plain("x", "Cột hiện tại"),
+    _plain("y", "Hàng hiện tại"),
+    _plain("gems_collected", "Số ngọc đã nhặt"),
+]
+
+BUILTIN_FUNCTIONS: list[Suggestion] = [
+    _call("print", "...", "In ra Bảng tin"),
+    _call("len", "x", "Đếm số phần tử"),
+    _call("range", "n", "Dãy số 0 .. n-1"),
+    _call("int", "x", "Đổi sang số nguyên"),
+    _call("str", "x", "Đổi sang chuỗi"),
+    _call("float", "x", "Đổi sang số thực"),
+    _call("bool", "x", "Đổi sang True/False"),
+    _call("list", "x", "Tạo / đổi sang list"),
+    _call("tuple", "x", "Tạo / đổi sang tuple"),
+    _call("dict", "", "Tạo dict"),
+    _call("set", "x", "Tạo tập hợp (bỏ phần tử trùng)"),
+    _call("sum", "numbers", "Tổng các số"),
+    _call("min", "values", "Giá trị nhỏ nhất"),
+    _call("max", "values", "Giá trị lớn nhất"),
+    _call("sorted", "values", "Sắp xếp, trả về list mới"),
+    _call("abs", "x", "Giá trị tuyệt đối"),
+    _call("round", "x, digits", "Làm tròn"),
+    _call("enumerate", "values", "Ghép số thứ tự với phần tử"),
+    _call("zip", "a, b", "Ghép từng cặp phần tử"),
+    _call("map", "function, values", "Áp hàm lên mọi phần tử"),
+    _call("filter", "function, values", "Giữ phần tử thoả điều kiện"),
+    _call("isinstance", "value, type", "Kiểm tra kiểu dữ liệu"),
+    _call("iter", "values", "Tạo iterator"),
+    _call("next", "iterator", "Lấy phần tử tiếp theo"),
+    _plain("DoorJammed", "Lỗi cửa kẹt (dùng với except)"),
+    _plain("ValueError", "Lỗi giá trị sai, ví dụ int(\"abc\")"),
+    _plain("KeyError", "Lỗi khoá không có trong dict"),
+    _plain("IndexError", "Lỗi vị trí ngoài list"),
+    _plain("TypeError", "Lỗi sai kiểu dữ liệu"),
+    _plain("Exception", "Mọi loại lỗi"),
+]
+
+KEYWORD_INSERTS: dict[str, tuple[str, str]] = {
+    "for": ("for ", "Vòng lặp: for x in ...:"),
+    "while": ("while ", "Lặp khi điều kiện còn đúng"),
+    "if": ("if ", "Nếu điều kiện đúng thì..."),
+    "elif": ("elif ", "Nếu không thì xét điều kiện khác"),
+    "else": ("else:", "Trường hợp còn lại"),
+    "def": ("def ", "Định nghĩa hàm"),
+    "return": ("return ", "Trả kết quả về từ hàm"),
+    "class": ("class ", "Định nghĩa class"),
+    "import": ("import ", "Nạp thư viện"),
+    "from": ("from ", "from thư_viện import tên"),
+    "try": ("try:", "Thử chạy, bắt lỗi bằng except"),
+    "except": ("except ", "Xử lý khi có lỗi"),
+    "finally": ("finally:", "Luôn chạy dù có lỗi hay không"),
+    "lambda": ("lambda ", "Hàm ngắn: lambda x: ..."),
+    "break": ("break", "Thoát vòng lặp"),
+    "continue": ("continue", "Sang vòng lặp tiếp theo"),
+    "pass": ("pass", "Không làm gì"),
+    "in": ("in ", "Thuộc / duyệt trong"),
+    "and": ("and ", "Và"),
+    "or": ("or ", "Hoặc"),
+    "not": ("not ", "Phủ định"),
+    "True": ("True", "Đúng"),
+    "False": ("False", "Sai"),
+    "None": ("None", "Không có giá trị"),
+    "with": ("with ", "Khối with"),
+    "raise": ("raise ", "Tự ném lỗi"),
+}
+KEYWORDS: list[Suggestion] = [
+    Suggestion(name, insert, hint) for name, (insert, hint) in KEYWORD_INSERTS.items()
+]
+
+MODULE_MEMBERS: dict[str, list[Suggestion]] = {
+    "math": [
+        _call("sqrt", "x", "Căn bậc hai"),
+        _plain("pi", "Số π"),
+        _call("gcd", "a, b", "Ước chung lớn nhất"),
+        _call("lcm", "a, b", "Bội chung nhỏ nhất"),
+        _call("hypot", "a, b", "Cạnh huyền √(a² + b²)"),
+        _call("ceil", "x", "Làm tròn lên"),
+        _call("floor", "x", "Làm tròn xuống"),
+        _call("factorial", "n", "Giai thừa n!"),
+        _call("comb", "n, k", "Số tổ hợp chập k của n"),
+        _call("pow", "x, y", "Luỹ thừa"),
+    ],
+    "re": [
+        _call("search", "pattern, text", "Tìm chỗ khớp đầu tiên"),
+        _call("findall", "pattern, text", "Tìm mọi chỗ khớp"),
+        _call("match", "pattern, text", "Khớp từ đầu chuỗi"),
+        _call("sub", "pattern, new, text", "Thay thế"),
+        _call("split", "pattern, text", "Tách chuỗi"),
+    ],
+    "numpy": [
+        _call("array", "values", "Tạo mảng NumPy"),
+        _call("sum", "array", "Tổng mọi phần tử"),
+        _call("dot", "a, b", "Nhân ma trận / tích vô hướng"),
+        _call("matmul", "a, b", "Nhân ma trận"),
+        _call("zeros", "shape", "Mảng toàn số 0"),
+        _call("ones", "shape", "Mảng toàn số 1"),
+        _call("arange", "n", "Dãy số dạng mảng"),
+        _call("mean", "array", "Trung bình"),
+        _call("max", "array", "Lớn nhất"),
+        _call("min", "array", "Nhỏ nhất"),
+        _call("trace", "array", "Tổng đường chéo"),
+        _call("transpose", "array", "Đổi hàng thành cột"),
+    ],
+    "itertools": [
+        _call("permutations", "values, k", "Mọi cách sắp xếp (hoán vị)"),
+        _call("combinations", "values, k", "Mọi cách chọn k phần tử (tổ hợp)"),
+        _call("product", "a, b", "Mọi cặp ghép"),
+        _call("chain", "a, b", "Nối nhiều dãy"),
+    ],
+    "collections": [
+        _call("Counter", "values", "Đếm số lần xuất hiện"),
+        _call("deque", "values", "Hàng đợi hai đầu"),
+        _call("defaultdict", "list", "Dict có giá trị mặc định"),
+    ],
+    "datetime": [
+        _call("date", "year, month, day", "Một ngày"),
+        _call("timedelta", "days=...", "Khoảng thời gian"),
+        _call("datetime", "...", "Ngày và giờ"),
+    ],
+    "date": [
+        _call("fromisoformat", "\"2026-01-01\"", "Đổi chuỗi năm-tháng-ngày thành ngày"),
+        _call("today", "", "Hôm nay"),
+    ],
+    "xml.etree.ElementTree": [
+        _call("fromstring", "text", "Đọc XML từ chuỗi"),
+    ],
+}
+
+COMMON_METHODS: list[Suggestion] = [
+    _call("append", "x", "list: thêm vào cuối"),
+    _call("pop", "", "list: lấy ra phần tử cuối"),
+    _call("insert", "index, x", "list: chèn vào vị trí"),
+    _call("remove", "x", "list: xoá phần tử"),
+    _call("sort", "", "list: sắp xếp tại chỗ"),
+    _call("reverse", "", "list: đảo ngược"),
+    _call("index", "x", "Vị trí của phần tử"),
+    _call("count", "x", "Đếm số lần xuất hiện"),
+    _call("keys", "", "dict: các khoá"),
+    _call("values", "", "dict: các giá trị"),
+    _call("items", "", "dict: các cặp (khoá, giá trị)"),
+    _call("get", "key", "dict: lấy giá trị theo khoá / XML: đọc thuộc tính"),
+    _call("add", "x", "set: thêm phần tử"),
+    _call("union", "other", "set: hợp"),
+    _call("intersection", "other", "set: giao"),
+    _call("difference", "other", "set: hiệu"),
+    _call("upper", "", "chuỗi: viết HOA"),
+    _call("lower", "", "chuỗi: viết thường"),
+    _call("title", "", "chuỗi: Viết Hoa Đầu Từ"),
+    _call("strip", "", "chuỗi: bỏ khoảng trắng hai đầu"),
+    _call("split", "sep", "chuỗi: tách thành list"),
+    _call("join", "values", "chuỗi: nối list thành chuỗi"),
+    _call("replace", "old, new", "chuỗi: thay thế"),
+    _call("startswith", "text", "chuỗi: bắt đầu bằng"),
+    _call("isdigit", "", "chuỗi: toàn chữ số?"),
+    _call("format", "...", "chuỗi: định dạng"),
+    _call("popleft", "", "deque: lấy người đầu hàng"),
+    _call("appendleft", "x", "deque: thêm vào đầu"),
+    _call("rotate", "n", "deque: xoay hàng"),
+    _call("most_common", "n", "Counter: phổ biến nhất"),
+    _call("group", "n", "regex: lấy nhóm đã khớp"),
+    _call("findall", "tag", "XML: mọi thẻ con"),
+    _call("find", "tag", "XML: thẻ con đầu tiên"),
+    _call("sum", "", "NumPy: tổng"),
+    _plain("shape", "NumPy: (số hàng, số cột)"),
+    _call("mean", "", "NumPy: trung bình"),
+    _plain("days", "timedelta: số ngày"),
+    _call("weekday", "", "date: thứ trong tuần (0 = thứ Hai)"),
+    _plain("tag", "XML: tên thẻ"),
+]
+
+IMPORTABLE = ["math", "itertools", "collections", "datetime", "re", "numpy", "xml.etree.ElementTree", "functools", "statistics"]
+
+IDENTIFIER_BEFORE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+IMPORT_AS = re.compile(r"^\s*import\s+([\w.]+)(?:\s+as\s+(\w+))?")
+FROM_IMPORT = re.compile(r"^\s*from\s+([\w.]+)\s+import\s+(.+)")
+MAX_SUGGESTIONS = 7
+
+
+def _in_text(line: str, column: int) -> bool:
+    quote: str | None = None
+    for char in line[:column]:
+        if quote:
+            if char == quote:
+                quote = None
+        elif char in "\"'":
+            quote = char
+        elif char == "#":
+            return True
+    return quote is not None
+
+
+def _module_aliases(lines: list[str]) -> dict[str, str]:
+    """Map names used in code (np, math, date, ET...) to the module they come from."""
+    aliases: dict[str, str] = {}
+    for line in lines:
+        match = IMPORT_AS.match(line)
+        if match:
+            module, alias = match.group(1), match.group(2)
+            aliases[alias or module.split(".")[0]] = module
+            continue
+        match = FROM_IMPORT.match(line)
+        if match:
+            for name in match.group(2).split(","):
+                name = name.strip().split(" as ")[-1].strip()
+                if name:
+                    aliases[name] = name if name in MODULE_MEMBERS else match.group(1)
+    return aliases
+
+
+def _names_in_code(lines: list[str], skip_row: int) -> set[str]:
+    names: set[str] = set()
+    for index, line in enumerate(lines):
+        code = line.split("#", 1)[0]
+        code = re.sub(r"\"[^\"]*\"|'[^']*'", "", code)
+        for name in IDENTIFIER.findall(code):
+            if index == skip_row:
+                continue
+            if len(name) >= 2 and not keyword.iskeyword(name):
+                names.add(name)
+    return names
+
+
+def suggest(
+    lines: list[str],
+    row: int,
+    column: int,
+    extra_names: list[str] | None = None,
+) -> tuple[int, list[Suggestion]]:
+    """Return (column where the typed word starts, suggestions)."""
+    line = lines[row]
+    before = line[:column]
+    if _in_text(line, column):
+        return column, []
+    match = IDENTIFIER_BEFORE.search(before)
+    prefix = match.group(0) if match else ""
+    start = column - len(prefix)
+    if prefix and prefix[0].isdigit():
+        return column, []
+
+    if start > 0 and before[start - 1] == ".":
+        owner_match = IDENTIFIER_BEFORE.search(before[: start - 1])
+        owner = owner_match.group(0) if owner_match else ""
+        if owner == "hero":
+            pool = HERO_MEMBERS
+        else:
+            module = _module_aliases(lines).get(owner, owner)
+            pool = MODULE_MEMBERS.get(module, COMMON_METHODS)
+        return start, _filter(pool, prefix, allow_empty=True)
+
+    if not prefix:
+        return column, []
+
+    stripped = before.lstrip()
+    if stripped.startswith(("import ", "from ")) and " import " not in stripped:
+        pool = [Suggestion(name, name, "Thư viện được phép dùng") for name in IMPORTABLE]
+        return start, _filter(pool, prefix)
+    if re.search(r"\b(def|class)\s+\w*$", before):
+        return column, []
+
+    user_names = (_names_in_code(lines, row) | set(extra_names or [])) - set(KEYWORD_INSERTS)
+    known = {item.label.split("(")[0] for item in BUILTIN_FUNCTIONS} | {"hero"}
+    pool = [Suggestion("hero", "hero", "Nhân vật của bạn - gõ dấu . để xem lệnh")]
+    pool += [Suggestion(name, name, "Tên trong code / dữ liệu có sẵn") for name in sorted(user_names - known)]
+    pool += KEYWORDS + BUILTIN_FUNCTIONS
+    return start, _filter(pool, prefix)
+
+
+def _filter(pool: list[Suggestion], prefix: str, allow_empty: bool = False) -> list[Suggestion]:
+    if not prefix and not allow_empty:
+        return []
+    lowered = prefix.lower()
+    result = [
+        item
+        for item in pool
+        if item.insert.lower().startswith(lowered) and item.insert.rstrip("():").strip() != prefix
+    ]
+    return result[:MAX_SUGGESTIONS] if prefix else result[:MAX_SUGGESTIONS + 3]
+
+
+# ======================================================================
 # editor.py
 # ======================================================================
 
@@ -3453,8 +3778,13 @@ CODE_COLOR_GUTTER = (24, 26, 36)
 CODE_COLOR_LINE_NUMBER = (90, 96, 120)
 CODE_COLOR_CURRENT_LINE = (40, 43, 58)
 CODE_COLOR_ERROR_LINE = (110, 40, 52)
+CODE_COLOR_SELECTION = (62, 82, 140)
 CODE_COLOR_CURSOR = (255, 255, 255)
 CODE_COLOR_BORDER_FOCUS = (98, 114, 164)
+CODE_COLOR_POPUP = (44, 48, 66)
+CODE_COLOR_POPUP_BORDER = (110, 130, 190)
+CODE_COLOR_POPUP_ACTIVE = (70, 96, 170)
+CODE_COLOR_POPUP_HINT = (165, 172, 200)
 
 BUILTINS = {
     "print", "len", "range", "int", "str", "float", "bool", "list", "dict", "set",
@@ -3469,6 +3799,8 @@ TOKEN_PATTERN = re.compile(
     r"|(?P<word>[A-Za-z_À-ỹ][\wÀ-ỹ]*)"
     r"|(?P<other>.)"
 )
+
+Position = tuple[int, int]
 
 
 def in_text_context(line: str, column: int) -> bool:
@@ -3508,14 +3840,32 @@ def highlight(line: str) -> list[tuple[str, tuple[int, int, int]]]:
     return tokens
 
 
+def _get_clipboard() -> str:
+    try:
+        text = pygame.scrap.get_text()
+    except (pygame.error, AttributeError):
+        return ""
+    return (text or "").replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _set_clipboard(text: str) -> None:
+    try:
+        pygame.scrap.put_text(text)
+    except (pygame.error, AttributeError):
+        return
+
+
 class CodeEditor:
-    def __init__(self, font: pygame.font.Font) -> None:
+    def __init__(self, font: pygame.font.Font, hint_font: pygame.font.Font | None = None) -> None:
         self.font = font
+        self.hint_font = hint_font or font
         self.char_width = font.size("M")[0]
         self.line_height = font.get_linesize() + 2
         self.lines: list[str] = [""]
         self.row = 0
         self.column = 0
+        self.anchor: Position | None = None
+        self.dragging = False
         self.scroll = 0
         self.focused = True
         self.error_line: int | None = None
@@ -3524,6 +3874,11 @@ class CodeEditor:
         self.rect = pygame.Rect(0, 0, 100, 100)
         self.gutter_width = self.char_width * 4
         self.vietnamese = True
+        self.extra_names: list[str] = []
+        self.suggestions: list[Suggestion] = []
+        self.suggest_index = 0
+        self.suggest_start = 0
+        self.popup_rows: list[pygame.Rect] = []
 
     # ------------------------------------------------------------ content
     @property
@@ -3531,12 +3886,14 @@ class CodeEditor:
         return "\n".join(self.lines)
 
     def set_text(self, text: str) -> None:
-        self.lines = text.replace("\t", INDENT).rstrip("\n").split("\n") or [""]
+        self.lines = text.replace("\t", INDENT).replace("\r\n", "\n").rstrip("\n").split("\n") or [""]
         self.row = len(self.lines) - 1
         self.column = len(self.lines[self.row])
+        self.anchor = None
         self.scroll = 0
         self.error_line = None
         self.undo_stack.clear()
+        self.close_suggestions()
 
     def _save_undo(self) -> None:
         self.undo_stack.append((list(self.lines), self.row, self.column))
@@ -3547,10 +3904,50 @@ class CodeEditor:
         if not self.undo_stack:
             return
         self.lines, self.row, self.column = self.undo_stack.pop()
+        self.anchor = None
+        self.close_suggestions()
 
+    # ------------------------------------------------------------ selection
+    def selection(self) -> tuple[Position, Position] | None:
+        if self.anchor is None or self.anchor == (self.row, self.column):
+            return None
+        cursor = (self.row, self.column)
+        return (min(self.anchor, cursor), max(self.anchor, cursor))
+
+    def selected_text(self) -> str:
+        span = self.selection()
+        if span is None:
+            return ""
+        (start_row, start_col), (end_row, end_col) = span
+        if start_row == end_row:
+            return self.lines[start_row][start_col:end_col]
+        parts = [self.lines[start_row][start_col:]]
+        parts += self.lines[start_row + 1 : end_row]
+        parts.append(self.lines[end_row][:end_col])
+        return "\n".join(parts)
+
+    def _delete_selection(self) -> bool:
+        """Remove the selected text (caller saves undo). Returns True if something was removed."""
+        span = self.selection()
+        self.anchor = None
+        if span is None:
+            return False
+        (start_row, start_col), (end_row, end_col) = span
+        self.lines[start_row] = self.lines[start_row][:start_col] + self.lines[end_row][end_col:]
+        del self.lines[start_row + 1 : end_row + 1]
+        self.row, self.column = start_row, start_col
+        return True
+
+    def select_all(self) -> None:
+        self.anchor = (0, 0)
+        self.row = len(self.lines) - 1
+        self.column = len(self.lines[self.row])
+
+    # ------------------------------------------------------------ editing
     def insert(self, text: str) -> None:
         self._save_undo()
         self.error_line = None
+        self._delete_selection()
         for index, part in enumerate(text.replace("\r", "").replace("\t", INDENT).split("\n")):
             if index > 0:
                 self._split_line(auto_indent=False)
@@ -3574,11 +3971,14 @@ class CodeEditor:
     def newline(self) -> None:
         self._save_undo()
         self.error_line = None
+        self._delete_selection()
         self._split_line(auto_indent=True)
 
     def backspace(self) -> None:
         self._save_undo()
         self.error_line = None
+        if self._delete_selection():
+            return
         line = self.lines[self.row]
         if self.column > 0:
             before = line[: self.column]
@@ -3596,6 +3996,9 @@ class CodeEditor:
 
     def delete(self) -> None:
         self._save_undo()
+        self.error_line = None
+        if self._delete_selection():
+            return
         line = self.lines[self.row]
         if self.column < len(line):
             self.lines[self.row] = line[: self.column] + line[self.column + 1 :]
@@ -3603,20 +4006,122 @@ class CodeEditor:
             self.lines[self.row] = line + self.lines[self.row + 1]
             del self.lines[self.row + 1]
 
+    def _selected_rows(self) -> range:
+        span = self.selection()
+        if span is None:
+            return range(self.row, self.row + 1)
+        (start_row, _), (end_row, end_col) = span
+        if end_col == 0 and end_row > start_row:
+            end_row -= 1
+        return range(start_row, end_row + 1)
+
+    def indent_lines(self) -> None:
+        self._save_undo()
+        for row in self._selected_rows():
+            self.lines[row] = INDENT + self.lines[row]
+        if self.anchor is not None:
+            self.anchor = (self.anchor[0], self.anchor[1] + len(INDENT))
+        self.column += len(INDENT)
+
     def dedent(self) -> None:
-        line = self.lines[self.row]
-        if line.startswith(INDENT):
+        self._save_undo()
+        for row in self._selected_rows():
+            if self.lines[row].startswith(INDENT):
+                self.lines[row] = self.lines[row][len(INDENT) :]
+                if row == self.row:
+                    self.column = max(0, self.column - len(INDENT))
+                if self.anchor is not None and row == self.anchor[0]:
+                    self.anchor = (self.anchor[0], max(0, self.anchor[1] - len(INDENT)))
+
+    # ------------------------------------------------------------ clipboard
+    def copy(self) -> None:
+        """Copy the selection; with no selection copy the whole current line."""
+        text = self.selected_text() or self.lines[self.row] + "\n"
+        _set_clipboard(text)
+
+    def cut(self) -> None:
+        if self.selection() is None:
+            _set_clipboard(self.lines[self.row] + "\n")
             self._save_undo()
-            self.lines[self.row] = line[len(INDENT) :]
-            self.column = max(0, self.column - len(INDENT))
+            if len(self.lines) > 1:
+                del self.lines[self.row]
+                self.row = min(self.row, len(self.lines) - 1)
+            else:
+                self.lines = [""]
+            self.column = min(self.column, len(self.lines[self.row]))
+            return
+        _set_clipboard(self.selected_text())
+        self._save_undo()
+        self._delete_selection()
+
+    def paste(self) -> None:
+        text = _get_clipboard()
+        if text:
+            self.insert(text)
+
+    def shortcut(self, name: str) -> None:
+        """Run a Ctrl shortcut: "a" select all, "c" copy, "x" cut, "v" paste, "z" undo."""
+        actions = {"z": self.undo, "a": self.select_all, "c": self.copy, "x": self.cut, "v": self.paste}
+        if name not in actions:
+            return
+        actions[name]()
+        self.blink_timer = 0.0
+        if name != "c":
+            self.close_suggestions()
+
+    # ------------------------------------------------------------ suggestions
+    def close_suggestions(self) -> None:
+        self.suggestions = []
+        self.suggest_index = 0
+
+    def refresh_suggestions(self) -> None:
+        if self.selection() is not None:
+            self.close_suggestions()
+            return
+        start, items = suggest(self.lines, self.row, self.column, self.extra_names)
+        self.suggest_start = start
+        self.suggestions = items
+        self.suggest_index = 0
+
+    def accept_suggestion(self, index: int | None = None) -> None:
+        if not self.suggestions:
+            return
+        item = self.suggestions[self.suggest_index if index is None else index]
+        self._save_undo()
+        line = self.lines[self.row]
+        self.lines[self.row] = line[: self.suggest_start] + item.insert + line[self.column :]
+        self.column = self.suggest_start + len(item.insert) - item.cursor_back
+        self.close_suggestions()
 
     # ------------------------------------------------------------ events
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for index, rect in enumerate(self.popup_rows):
+                if self.suggestions and rect.collidepoint(event.pos):
+                    self.accept_suggestion(index)
+                    return True
             self.focused = self.rect.collidepoint(event.pos)
             if self.focused:
+                self.close_suggestions()
+                shift = pygame.key.get_mods() & pygame.KMOD_SHIFT
+                if not shift or self.anchor is None:
+                    self.anchor = None
+                previous = (self.row, self.column)
                 self._click(event.pos)
+                if shift:
+                    self.anchor = self.anchor or previous
+                else:
+                    self.anchor = (self.row, self.column)
+                self.dragging = True
             return self.focused
+        if event.type == pygame.MOUSEMOTION and self.dragging:
+            self._click(event.pos)
+            return True
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging:
+            self.dragging = False
+            if self.anchor == (self.row, self.column):
+                self.anchor = None
+            return True
         if event.type == pygame.MOUSEWHEEL and self.rect.collidepoint(mouse_pos()):
             self.scroll = max(0, min(len(self.lines) - 1, self.scroll - event.y * 3))
             return True
@@ -3625,14 +4130,27 @@ class CodeEditor:
         if event.type == pygame.TEXTINPUT:
             if not self._try_telex(event.text):
                 self.insert(event.text)
+                self.refresh_suggestions()
             return True
         if event.type == pygame.KEYDOWN:
             return self._key(event)
         return False
 
+    def handle_escape(self) -> bool:
+        """Close the suggestion popup / selection first. Returns True if Escape was used."""
+        if self.suggestions:
+            self.close_suggestions()
+            return True
+        if self.selection() is not None:
+            self.anchor = None
+            return True
+        return False
+
     def _try_telex(self, text: str) -> bool:
         """Apply Telex inside strings and comments only, so Python code stays untouched."""
         if not self.vietnamese or len(text) != 1 or not text.isascii() or not text.isalpha():
+            return False
+        if self.selection() is not None:
             return False
         line = self.lines[self.row]
         if not in_text_context(line, self.column):
@@ -3646,6 +4164,7 @@ class CodeEditor:
         self.error_line = None
         self.lines[self.row] = line[:word_start] + new_word + line[self.column :]
         self.column = word_start + len(new_word)
+        self.close_suggestions()
         return True
 
     def _click(self, position: tuple[int, int]) -> None:
@@ -3661,26 +4180,62 @@ class CodeEditor:
         key = event.key
         self.blink_timer = 0.0
 
-        if control and key == pygame.K_z:
-            self.undo()
-        elif control and key == pygame.K_v:
-            self._paste()
-        elif control and key == pygame.K_c:
-            self._copy_all()
-        elif key == pygame.K_RETURN or key == pygame.K_KP_ENTER:
-            if control:
+        if self.suggestions and not control:
+            if key == pygame.K_DOWN:
+                self.suggest_index = (self.suggest_index + 1) % len(self.suggestions)
+                return True
+            if key == pygame.K_UP:
+                self.suggest_index = (self.suggest_index - 1) % len(self.suggestions)
+                return True
+            if key in (pygame.K_TAB, pygame.K_RETURN, pygame.K_KP_ENTER):
+                self.accept_suggestion()
+                return True
+
+        if control:
+            letters = {pygame.K_z: "z", pygame.K_a: "a", pygame.K_c: "c", pygame.K_x: "x", pygame.K_v: "v"}
+            if key in letters:
+                self.shortcut(letters[key])
+                return True
+            if key == pygame.K_SPACE:
+                self.refresh_suggestions()
+                return True
+            if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                 return False
+
+        if key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             self.newline()
+            self.close_suggestions()
         elif key == pygame.K_BACKSPACE:
             self.backspace()
+            if self.suggestions:
+                self.refresh_suggestions()
         elif key == pygame.K_DELETE:
             self.delete()
+            self.close_suggestions()
         elif key == pygame.K_TAB:
             if shift:
                 self.dedent()
+            elif self.selection() is not None:
+                self.indent_lines()
             else:
                 self.insert(INDENT)
-        elif key == pygame.K_LEFT:
+        elif key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_HOME, pygame.K_END):
+            self._navigate(key, shift)
+            self.close_suggestions()
+        else:
+            return False
+        return True
+
+    def _navigate(self, key: int, extend: bool) -> None:
+        if extend and self.anchor is None:
+            self.anchor = (self.row, self.column)
+        elif not extend:
+            span = self.selection()
+            self.anchor = None
+            if span is not None and key in (pygame.K_LEFT, pygame.K_RIGHT):
+                self.row, self.column = span[0] if key == pygame.K_LEFT else span[1]
+                return
+        if key == pygame.K_LEFT:
             self._move_horizontal(-1)
         elif key == pygame.K_RIGHT:
             self._move_horizontal(1)
@@ -3694,9 +4249,6 @@ class CodeEditor:
             self.column = 0 if self.column == first_char else first_char
         elif key == pygame.K_END:
             self.column = len(self.lines[self.row])
-        else:
-            return False
-        return True
 
     def _move_horizontal(self, delta: int) -> None:
         self.column += delta
@@ -3711,20 +4263,6 @@ class CodeEditor:
     def _move_vertical(self, delta: int) -> None:
         self.row = max(0, min(len(self.lines) - 1, self.row + delta))
         self.column = min(self.column, len(self.lines[self.row]))
-
-    def _paste(self) -> None:
-        try:
-            text = pygame.scrap.get_text()
-        except (pygame.error, AttributeError):
-            return
-        if text:
-            self.insert(text.replace("\x00", ""))
-
-    def _copy_all(self) -> None:
-        try:
-            pygame.scrap.put_text(self.text)
-        except (pygame.error, AttributeError):
-            return
 
     # ------------------------------------------------------------ drawing
     def update(self, delta_seconds: float) -> None:
@@ -3742,6 +4280,7 @@ class CodeEditor:
         elif self.row >= self.scroll + visible_rows:
             self.scroll = self.row - visible_rows + 1
 
+        span = self.selection()
         previous_clip = surface.get_clip()
         surface.set_clip(rect)
         text_x = rect.x + self.gutter_width + 8
@@ -3753,8 +4292,10 @@ class CodeEditor:
             line_rect = pygame.Rect(rect.x + gutter.width, y - 1, rect.width - gutter.width, self.line_height)
             if self.error_line == line_index + 1:
                 pygame.draw.rect(surface, CODE_COLOR_ERROR_LINE, line_rect)
-            elif line_index == self.row and self.focused:
+            elif line_index == self.row and self.focused and span is None:
                 pygame.draw.rect(surface, CODE_COLOR_CURRENT_LINE, line_rect)
+            if span is not None:
+                self._draw_selection_row(surface, span, line_index, text_x, y)
 
             number = self.font.render(str(line_index + 1).rjust(3), True, CODE_COLOR_LINE_NUMBER)
             surface.blit(number, (rect.x + 4, y))
@@ -3765,14 +4306,65 @@ class CodeEditor:
                 surface.blit(rendered, (x, y))
                 x += self.char_width * len(text)
 
+        cursor_x = text_x + self.column * self.char_width
+        cursor_y = rect.y + 6 + (self.row - self.scroll) * self.line_height
         if self.focused and (self.blink_timer % 1.0) < 0.6:
-            cursor_x = text_x + self.column * self.char_width
-            cursor_y = rect.y + 6 + (self.row - self.scroll) * self.line_height
             pygame.draw.line(surface, CODE_COLOR_CURSOR, (cursor_x, cursor_y), (cursor_x, cursor_y + self.line_height - 3), 2)
 
         surface.set_clip(previous_clip)
         if self.focused:
             pygame.draw.rect(surface, CODE_COLOR_BORDER_FOCUS, rect, width=2, border_radius=8)
+        self._draw_popup(surface, text_x + self.suggest_start * self.char_width, cursor_y)
+
+    def _draw_selection_row(
+        self,
+        surface: pygame.Surface,
+        span: tuple[Position, Position],
+        line_index: int,
+        text_x: int,
+        y: int,
+    ) -> None:
+        (start_row, start_col), (end_row, end_col) = span
+        if not start_row <= line_index <= end_row:
+            return
+        line_length = len(self.lines[line_index])
+        first = start_col if line_index == start_row else 0
+        last = end_col if line_index == end_row else line_length + 1
+        if last <= first:
+            return
+        box = pygame.Rect(text_x + first * self.char_width, y - 1, (last - first) * self.char_width, self.line_height)
+        pygame.draw.rect(surface, CODE_COLOR_SELECTION, box)
+
+    def _draw_popup(self, surface: pygame.Surface, x: int, cursor_y: int) -> None:
+        self.popup_rows = []
+        if not self.suggestions or not self.focused:
+            return
+        row_height = self.line_height + 4
+        labels = [self.font.render(item.label, True, CODE_COLOR_TEXT) for item in self.suggestions]
+        hints = [self.hint_font.render(item.hint, True, CODE_COLOR_POPUP_HINT) for item in self.suggestions]
+        label_width = max(label.get_width() for label in labels)
+        width = min(self.rect.width - 8, label_width + 24 + max(hint.get_width() for hint in hints) + 16)
+        height = row_height * len(self.suggestions) + 26
+        box = pygame.Rect(x, cursor_y + self.line_height + 2, width, height)
+        if box.bottom > surface.get_height() - 4:
+            box.bottom = cursor_y - 2
+        box.right = min(box.right, self.rect.right - 4)
+        box.left = max(box.left, self.rect.left + 4)
+
+        pygame.draw.rect(surface, CODE_COLOR_POPUP, box, border_radius=6)
+        pygame.draw.rect(surface, CODE_COLOR_POPUP_BORDER, box, width=1, border_radius=6)
+        previous_clip = surface.get_clip()
+        surface.set_clip(box)
+        for index, (label, hint) in enumerate(zip(labels, hints, strict=True)):
+            row_rect = pygame.Rect(box.x + 2, box.y + 3 + index * row_height, box.width - 4, row_height)
+            if index == self.suggest_index:
+                pygame.draw.rect(surface, CODE_COLOR_POPUP_ACTIVE, row_rect, border_radius=4)
+            surface.blit(label, (row_rect.x + 8, row_rect.y + 2))
+            surface.blit(hint, (row_rect.x + 16 + label_width, row_rect.y + 3))
+            self.popup_rows.append(row_rect)
+        footer = self.hint_font.render("Tab / Enter: chọn  ·  ↑↓: đổi  ·  Esc: đóng", True, CODE_COLOR_POPUP_HINT)
+        surface.blit(footer, (box.x + 10, box.bottom - 22))
+        surface.set_clip(previous_clip)
 
 
 # ======================================================================
@@ -4033,6 +4625,28 @@ def user_data_dir() -> Path:
     return folder
 
 
+def documents_dir() -> Path:
+    """The user's Documents folder (follows OneDrive redirection on Windows)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            buffer = ctypes.create_unicode_buffer(260)
+            # CSIDL_PERSONAL = 5 (Documents)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buffer) == 0 and buffer.value:
+                return Path(buffer.value)
+        except (AttributeError, OSError):
+            pass
+    return Path.home() / "Documents"
+
+
+def backup_dir() -> Path | None:
+    """Folder for the easy-to-find progress backup (only for the installed .exe)."""
+    if not IS_PACKAGED:
+        return None
+    return documents_dir() / "OneSpace CodeQuest"
+
+
 TILE = 48
 
 ENEMY_FOLDERS: dict[str, tuple[str, int]] = {
@@ -4122,6 +4736,108 @@ class Assets:
     def _tile(tileset: pygame.Surface, column: int, row: int) -> pygame.Surface:
         tile = tileset.subsurface((column * 16, row * 16, 16, 16))
         return pygame.transform.scale(tile, (TILE, TILE))
+
+
+# ======================================================================
+# progress.py
+# ======================================================================
+
+FORMAT_VERSION = 1
+BACKUP_NAME = "tien-do.json"
+
+
+def _read(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, path)
+
+
+class Progress:
+    def __init__(self, main_file: Path, backup_dir: Path | None = None) -> None:
+        self.main_file = main_file
+        self.backup_dir = backup_dir
+        self.completed: set[str] = set()
+        self.code: dict[str, str] = {}
+        self.restored_from_backup = False
+        self._load()
+
+    # ------------------------------------------------------------ loading
+    @property
+    def backup_file(self) -> Path | None:
+        return self.backup_dir / BACKUP_NAME if self.backup_dir else None
+
+    def _load(self) -> None:
+        data = _read(self.main_file)
+        if data is None:
+            data = _read(self.main_file.with_name(self.main_file.name + ".bak"))
+        if data is None and self.backup_file is not None:
+            data = _read(self.backup_file)
+            self.restored_from_backup = data is not None and bool(data.get("completed") or data.get("code"))
+        if data is not None:
+            self._merge(data)
+
+    def _merge(self, data: dict[str, Any]) -> int:
+        """Merge saved data into this progress. Returns how many new completed levels were added."""
+        before = len(self.completed)
+        self.completed |= {str(level_id) for level_id in data.get("completed", [])}
+        for level_id, text in dict(data.get("code", {})).items():
+            if isinstance(text, str) and level_id not in self.code:
+                self.code[str(level_id)] = text
+        return len(self.completed) - before
+
+    # ------------------------------------------------------------ saving
+    def to_json(self) -> str:
+        data = {
+            "app": "OneSpace CodeQuest",
+            "format": FORMAT_VERSION,
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "completed": sorted(self.completed),
+            "code": self.code,
+        }
+        return json.dumps(data, ensure_ascii=False, indent=2)
+
+    def save(self) -> None:
+        text = self.to_json()
+        if self.main_file.exists():
+            try:
+                os.replace(self.main_file, self.main_file.with_name(self.main_file.name + ".bak"))
+            except OSError:
+                pass
+        _write_atomic(self.main_file, text)
+        if self.backup_file is not None:
+            try:
+                _write_atomic(self.backup_file, text)
+            except OSError:
+                pass
+
+    def export_backup(self) -> Path | None:
+        """Write the backup copy now. Returns its path, or None if there is no backup folder."""
+        if self.backup_file is None:
+            return None
+        _write_atomic(self.backup_file, self.to_json())
+        return self.backup_file
+
+    def restore_backup(self) -> int | None:
+        """Merge the backup copy into current progress. Returns new completed levels, or None if no backup."""
+        if self.backup_file is None:
+            return None
+        data = _read(self.backup_file)
+        if data is None:
+            return None
+        added = self._merge(data)
+        self.save()
+        return added
 
 
 # ======================================================================
@@ -4219,23 +4935,6 @@ class Button:
         pygame.draw.rect(surface, (255, 255, 255, 40), self.rect, width=1, border_radius=8)
         label = font.render(self.label, True, COLOR_TEXT)
         surface.blit(label, label.get_rect(center=self.rect.center))
-
-
-class Progress:
-    def __init__(self) -> None:
-        self.completed: set[str] = set()
-        self.code: dict[str, str] = {}
-        if PROGRESS_FILE.exists():
-            try:
-                data = json.loads(PROGRESS_FILE.read_text(encoding="utf-8"))
-                self.completed = set(data.get("completed", []))
-                self.code = dict(data.get("code", {}))
-            except (OSError, ValueError):
-                pass
-
-    def save(self) -> None:
-        data = {"completed": sorted(self.completed), "code": self.code}
-        PROGRESS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class Playback:
@@ -4457,8 +5156,8 @@ class App:
 
         self.assets = Assets()
         self.logo = load_logo(96)
-        self.progress = Progress()
-        self.editor = CodeEditor(self.font_code)
+        self.progress = Progress(PROGRESS_FILE, backup_dir())
+        self.editor = CodeEditor(self.font_code, self.font_small)
         self.levels = all_levels()
         self.scene = "menu"
         self.level: Level = self.levels[0]
@@ -4475,6 +5174,13 @@ class App:
         self.play_buttons: list[Button] = []
         self.win_buttons: list[Button] = []
         self.menu_stage = self._first_unfinished_stage()
+        self.menu_tool_buttons = [
+            Button(pygame.Rect(1020, 30, 196, 36), "Sao lưu tiến độ", self.backup_progress, (46, 120, 90)),
+            Button(pygame.Rect(1020, 72, 196, 36), "Khôi phục tiến độ", self.restore_progress, (90, 80, 140)),
+        ]
+        self.toast: tuple[str, float] | None = None
+        if self.progress.restored_from_backup:
+            self.show_toast("Đã tự khôi phục tiến độ từ bản sao lưu trong Documents.")
         self._build_menu()
 
     # ------------------------------------------------------------ scenes
@@ -4491,6 +5197,34 @@ class App:
     def select_stage(self, stage_number: int) -> None:
         self.menu_stage = stage_number
         self._build_menu()
+
+    def show_toast(self, text: str, seconds: float = 5.0) -> None:
+        self.toast = (text, seconds)
+
+    def backup_progress(self) -> None:
+        self.save_code()
+        try:
+            path = self.progress.export_backup()
+        except OSError as error:
+            self.show_toast(f"Không sao lưu được: {error}")
+            return
+        if path is None:
+            self.show_toast("Bản chạy thử từ mã nguồn: tiến độ nằm ở progress.json trong thư mục dự án.")
+            return
+        self.show_toast(f"Đã sao lưu vào {path}. Có thể chép file này sang USB / máy khác.", 7.0)
+        try:
+            os.startfile(path.parent)  # type: ignore[attr-defined]
+        except (AttributeError, OSError):
+            pass
+
+    def restore_progress(self) -> None:
+        added = self.progress.restore_backup()
+        if added is None:
+            folder = self.progress.backup_dir or "Documents/OneSpace CodeQuest"
+            self.show_toast(f"Chưa có bản sao lưu. Hãy chép file tien-do.json vào {folder} rồi thử lại.", 7.0)
+            return
+        self._build_menu()
+        self.show_toast(f"Đã khôi phục tiến độ: thêm {added} màn hoàn thành.")
 
     def _build_menu(self) -> None:
         self.menu_buttons = []
@@ -4541,6 +5275,7 @@ class App:
         self.scene = "play"
         self.playback = Playback(level)
         self.editor.set_text(self.progress.code.get(level.id, level.starter))
+        self.editor.extra_names = list(level.extra_globals)
         self.editor.focused = True
         self.console = []
         self.hint_index = 0
@@ -4662,7 +5397,7 @@ class App:
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if self.scene == "menu":
-            for button in self.menu_buttons:
+            for button in [*self.menu_buttons, *self.menu_tool_buttons]:
                 if button.handle_event(event):
                     return
             return
@@ -4689,6 +5424,8 @@ class App:
             self.run()
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            if self.editor.handle_escape():
+                return
             if self.show_theory:
                 self.show_theory = False
             else:
@@ -4697,6 +5434,9 @@ class App:
         self.editor.handle_event(event)
 
     def update(self, delta_seconds: float) -> None:
+        if self.toast is not None:
+            text, remaining = self.toast
+            self.toast = (text, remaining - delta_seconds) if remaining > delta_seconds else None
         if self.scene != "play":
             return
         self.editor.update(delta_seconds)
@@ -4764,6 +5504,21 @@ class App:
 
         for button in self.menu_buttons[len(STAGES):]:
             button.draw(self.screen, self.font)
+        for button in self.menu_tool_buttons:
+            button.draw(self.screen, self.font_small)
+        self.draw_toast()
+
+    def draw_toast(self) -> None:
+        if self.toast is None:
+            return
+        lines = wrap_text(self.toast[0], self.font, 900)
+        box = pygame.Rect(0, 0, 940, 20 + 24 * len(lines))
+        box.midbottom = (SCREEN_SIZE[0] // 2, SCREEN_SIZE[1] - 24)
+        pygame.draw.rect(self.screen, (20, 70, 60), box, border_radius=10)
+        pygame.draw.rect(self.screen, COLOR_GOOD, box, width=2, border_radius=10)
+        for index, line in enumerate(lines):
+            rendered = self.font.render(line, True, COLOR_TEXT)
+            self.screen.blit(rendered, (box.x + 20, box.y + 10 + index * 24))
 
     def draw_play(self) -> None:
         world_info = world_of(self.level.id)

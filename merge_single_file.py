@@ -21,9 +21,11 @@ MODULE_ORDER = [
     "levels",
     "theory",
     "display",
+    "completion",
     "editor",
     "theory_view",
     "assets",
+    "progress",
     "game",
 ]
 

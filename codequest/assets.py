@@ -29,6 +29,28 @@ def user_data_dir() -> Path:
     return folder
 
 
+def documents_dir() -> Path:
+    """The user's Documents folder (follows OneDrive redirection on Windows)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            buffer = ctypes.create_unicode_buffer(260)
+            # CSIDL_PERSONAL = 5 (Documents)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buffer) == 0 and buffer.value:
+                return Path(buffer.value)
+        except (AttributeError, OSError):
+            pass
+    return Path.home() / "Documents"
+
+
+def backup_dir() -> Path | None:
+    """Folder for the easy-to-find progress backup (only for the installed .exe)."""
+    if not IS_PACKAGED:
+        return None
+    return documents_dir() / "OneSpace CodeQuest"
+
+
 TILE = 48
 
 ENEMY_FOLDERS: dict[str, tuple[str, int]] = {

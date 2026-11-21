@@ -14,6 +14,10 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
 - **Tự suy nghĩ**: game không hiện lời giải; nút Gợi ý chỉ gợi hướng.
 - **Thân thiện với học sinh Việt Nam**: lời giải thích bằng tiếng Việt, bộ gõ Telex có sẵn
   (chỉ hoạt động trong dấu nháy và ghi chú nên không làm hỏng code).
+- **Khung code dễ dùng**: gõ vài chữ đầu là hiện **gợi ý lệnh** kèm giải thích (Tab / Enter để chọn,
+  Ctrl+Space để mở lại); bôi đen bằng chuột hoặc Shift + mũi tên; Ctrl+A / C / X / V / Z;
+  Tab thụt lề cả đoạn đã chọn.
+- **Không mất bài**: code và các màn đã qua được lưu tự động, cài lại game vẫn còn.
 
 ## Tải game (Windows)
 
@@ -21,6 +25,15 @@ Vào mục **[Releases](../../releases)**, tải file `OneSpace-CodeQuest-v…-W
 giải nén rồi bấm đúp `OneSpace-CodeQuest.exe`. Không cần cài Python.
 
 Nếu Windows hiện "Windows protected your PC": bấm **More info → Run anyway**.
+
+### Tiến độ được lưu ở đâu
+
+- Bản chính: `%APPDATA%\OneSpaceCodeQuest\progress.json` – giữ nguyên khi xoá / cài lại game
+  hoặc cập nhật lên bản mới.
+- Bản sao lưu: `Documents\OneSpace CodeQuest\tien-do.json` – tự cập nhật mỗi lần lưu. Nếu bản chính
+  bị mất, game tự khôi phục từ bản này.
+- Đổi máy: ở menu bấm **Sao lưu tiến độ** (mở sẵn thư mục chứa file), chép `tien-do.json` sang
+  thư mục `Documents\OneSpace CodeQuest` của máy mới, rồi bấm **Khôi phục tiến độ**.
 
 ## Lộ trình 5 giai đoạn
 
@@ -91,7 +104,9 @@ codequest/engine.py       Luật chơi + chạy code người chơi an toàn (kh
 codequest/levels.py       5 giai đoạn, 23 world, 48 màn (bản đồ ASCII, code ban đầu, gợi ý)
 codequest/theory.py       Lý thuyết từng màn
 codequest/game.py         Giao diện: menu theo giai đoạn, bản đồ, phát lại hoạt ảnh, bảng tin
-codequest/editor.py       Trình soạn code (tô màu, tự thụt lề, undo, Telex)
+codequest/editor.py       Trình soạn code (tô màu, tự thụt lề, bôi đen, copy/paste, undo, Telex)
+codequest/completion.py   Gợi ý code khi gõ
+codequest/progress.py     Lưu / sao lưu / khôi phục tiến độ
 codequest/telex.py        Bộ gõ tiếng Việt Telex
 codequest/theory_view.py  Khung lý thuyết cuộn được
 codequest/display.py      Co giãn khung hình theo cửa sổ
