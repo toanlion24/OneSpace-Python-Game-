@@ -1,0 +1,22 @@
+# Build outputs
+build/
+dist/
+release/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Player data
+progress.json
+selftest.txt
+
+# CraftPix art kit: its licence does not allow redistributing the original files.
+# Download it from craftpix.net and unzip into gamekit/ (see README).
+gamekit/
+
+# Local tool settings
+.claude/
+
+# Lời giải mẫu: chỉ giữ trên máy giáo viên, không đẩy lên GitHub, không đóng gói vào .exe
+solutions/

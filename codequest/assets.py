@@ -1,0 +1,120 @@
+"""Loads sprites from the Craftpix platformer kit in ./gamekit."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import pygame
+
+IS_PACKAGED = getattr(sys, "frozen", False)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Khi đóng gói bằng PyInstaller, dữ liệu nằm trong thư mục giải nén tạm (sys._MEIPASS).
+BUNDLE_ROOT = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
+KIT = BUNDLE_ROOT / "gamekit"
+LOGO_PATH = BUNDLE_ROOT / "assets" / "onespace_logo.png"
+# Vùng hình tròn (tên lửa) trong logo OneSpace, dùng làm icon.
+LOGO_ICON_BOX = (224, 120, 700, 596)
+APP_TITLE = "OneSpace CodeQuest - Học Python qua trò chơi"
+
+
+def user_data_dir() -> Path:
+    """Nơi lưu tiến độ: %APPDATA%/CodeQuest khi chạy bản .exe, thư mục dự án khi phát triển."""
+    if not IS_PACKAGED:
+        return PROJECT_ROOT
+    base = Path(os.environ.get("APPDATA", Path.home()))
+    folder = base / "OneSpaceCodeQuest"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+TILE = 48
+
+ENEMY_FOLDERS: dict[str, tuple[str, int]] = {
+    "robot": ("1", 48),
+    "barrel": ("3", 48),
+    "cannon": ("4", 48),
+    "spikebox": ("5", 48),
+    "duck": ("6 (48x72)", 72),
+}
+
+
+def load_logo(height: int) -> pygame.Surface | None:
+    """Full OneSpace logo scaled to `height` pixels, or None if the file is missing."""
+    try:
+        logo = pygame.image.load(str(LOGO_PATH)).convert_alpha()
+    except (pygame.error, FileNotFoundError):
+        return None
+    width = round(logo.get_width() * height / logo.get_height())
+    return pygame.transform.smoothscale(logo, (width, height))
+
+
+def load_logo_icon(size: int) -> pygame.Surface | None:
+    """Round rocket emblem from the logo; works before the display is created."""
+    try:
+        logo = pygame.image.load(str(LOGO_PATH))
+    except (pygame.error, FileNotFoundError):
+        return None
+    left, top, right, bottom = LOGO_ICON_BOX
+    emblem = logo.subsurface((left, top, right - left, bottom - top))
+    return pygame.transform.smoothscale(emblem, (size, size))
+
+
+def load_image(relative_path: str) -> pygame.Surface:
+    return pygame.image.load(str(KIT / relative_path)).convert_alpha()
+
+
+def slice_strip(sheet: pygame.Surface, frame_width: int, scale: float) -> list[pygame.Surface]:
+    frame_height = sheet.get_height()
+    frame_count = max(1, sheet.get_width() // frame_width)
+    size = (round(frame_width * scale), round(frame_height * scale))
+    frames = []
+    for index in range(frame_count):
+        frame = sheet.subsurface((index * frame_width, 0, frame_width, frame_height))
+        frames.append(pygame.transform.scale(frame, size))
+    return frames
+
+
+def strip(relative_path: str, frame_width: int, scale: float) -> list[pygame.Surface]:
+    return slice_strip(load_image(relative_path), frame_width, scale)
+
+
+class Assets:
+    def __init__(self, hero_skin: int = 1) -> None:
+        tileset = load_image("2 Locations/Tiles/Tileset.png")
+        self.floor = self._tile(tileset, 1, 1)
+        self.wall = self._tile(tileset, 1, 4)
+        self.door_locked = self._tile(tileset, 13, 5)
+        self.door_jammed = self._tile(tileset, 6, 8)
+
+        hero_dir = f"1 Main Characters/{hero_skin}"
+        hero_scale = TILE / 32 * 1.25
+        self.hero = {
+            "idle": strip(f"{hero_dir}/Idle.png", 32, hero_scale),
+            "run": strip(f"{hero_dir}/Run.png", 32, hero_scale),
+            "hit": strip(f"{hero_dir}/Hit.png", 32, hero_scale),
+            "jump": strip(f"{hero_dir}/Jump.png", 32, hero_scale),
+        }
+        self.appearing = strip("1 Main Characters/Appearing.png", 96, hero_scale)
+
+        self.enemies: dict[str, dict[str, list[pygame.Surface]]] = {}
+        for kind, (folder, frame_width) in ENEMY_FOLDERS.items():
+            scale = 1.8 if kind == "duck" else 1.6
+            self.enemies[kind] = {
+                "idle": strip(f"4 Enemies/{folder}/Idle.png", frame_width, scale),
+                "hit": strip(f"4 Enemies/{folder}/Hit.png", frame_width, scale),
+            }
+
+        self.gems = {color: strip(f"3 Objects/Gems/{color}.png", 16, 2.5) for color in range(1, 7)}
+        self.trophy = strip("3 Objects/Checkpoints/End_Idle.png", 64, 0.95)
+        self.spike = strip("6 Traps/4.png", 48, 1.0)[4]
+        self.backgrounds = {
+            index: pygame.transform.scale(load_image(f"2 Locations/Backgrounds/{index}.png"), (128, 128))
+            for index in range(1, 7)
+        }
+
+    @staticmethod
+    def _tile(tileset: pygame.Surface, column: int, row: int) -> pygame.Surface:
+        tile = tileset.subsurface((column * 16, row * 16, 16, 16))
+        return pygame.transform.scale(tile, (TILE, TILE))
