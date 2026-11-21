@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .engine import Level
+from .levels_practice import PRACTICE
 
 
 @dataclass
@@ -1263,6 +1264,11 @@ WORLDS: list[World] = [
         ),
     ]),
 ]
+
+# Bài luyện tập thêm (levels_practice.py) được nối vào cuối mỗi World;
+# mã bài cũ giữ nguyên nên tiến độ cũ của học sinh không bị ảnh hưởng.
+for _world in WORLDS:
+    _world.levels.extend(PRACTICE.get(_world.number, []))
 
 
 def all_levels() -> list[Level]:

@@ -743,6 +743,19 @@ ALLOWED_MODULES = {
 }
 
 
+def _time_without_sleep() -> Any:
+    import types
+
+    module = types.ModuleType("time")
+    for attribute in dir(time):
+        if attribute != "sleep" and not attribute.startswith("__"):
+            setattr(module, attribute, getattr(time, attribute))
+    return module
+
+
+_TIME_WITHOUT_SLEEP = _time_without_sleep()
+
+
 def _safe_import(
     name: str,
     globals_: Any = None,
@@ -750,6 +763,10 @@ def _safe_import(
     fromlist: Any = (),
     level: int = 0,
 ) -> Any:
+    if level == 0 and name == "time":
+        # datetime.strftime tự import "time" bên trong. Trả về bản không có sleep để
+        # code học sinh không thể làm treo game.
+        return _TIME_WITHOUT_SLEEP
     if level > 0:
         # Thư viện được phép (ví dụ NumPy) đôi khi tự import tương đối bên trong nó.
         package = (globals_ or {}).get("__package__") or ""
@@ -787,7 +804,24 @@ def _is_closure(node: ast.AST) -> bool:
     )
 
 
-OPERATOR_TOKENS: dict[str, type] = {"&": ast.BitAnd, "|": ast.BitOr, "-": ast.Sub, "@": ast.MatMult}
+OPERATOR_TOKENS: dict[str, type] = {
+    "&": ast.BitAnd, "|": ast.BitOr, "-": ast.Sub, "@": ast.MatMult, "^": ast.BitXor,
+}
+
+
+def _has_nested_for(nodes: list[ast.AST]) -> bool:
+    return any(
+        isinstance(n, ast.For) and any(isinstance(inner, ast.For) for inner in ast.walk(n) if inner is not n)
+        for n in nodes
+    )
+
+
+def _has_method(nodes: list[ast.AST]) -> bool:
+    return any(
+        isinstance(n, ast.ClassDef)
+        and any(isinstance(item, ast.FunctionDef) and not item.name.startswith("__") for item in n.body)
+        for n in nodes
+    )
 
 
 def _check_one(requirement: str, nodes: list[ast.AST], call_names: set[str], imported: set[str]) -> bool:
@@ -798,6 +832,11 @@ def _check_one(requirement: str, nodes: list[ast.AST], call_names: set[str], imp
     if requirement.startswith("dunder:"):
         name = requirement[7:]
         return any(isinstance(n, ast.FunctionDef) and n.name == name for n in nodes)
+    if requirement.startswith("except:"):
+        name = requirement[7:]
+        return any(
+            isinstance(n, ast.ExceptHandler) and isinstance(n.type, ast.Name) and n.type.id == name for n in nodes
+        )
     if requirement.startswith("op:"):
         operator_type = OPERATOR_TOKENS[requirement[3:]]
         return any(isinstance(n, ast.BinOp) and isinstance(n.op, operator_type) for n in nodes)
@@ -826,6 +865,19 @@ REQUIREMENT_CHECKS: dict[str, Any] = {
         isinstance(n, ast.FunctionDef) and n.decorator_list for n in nodes
     ),
     "closure": lambda nodes, calls: any(_is_closure(n) for n in nodes),
+    "boolop": lambda nodes, calls: any(isinstance(n, ast.BoolOp) for n in nodes),
+    "nested_for": lambda nodes, calls: _has_nested_for(nodes),
+    "subscript": lambda nodes, calls: any(
+        isinstance(n, ast.Subscript) and not isinstance(n.slice, ast.Slice) for n in nodes
+    ),
+    "membership": lambda nodes, calls: any(
+        isinstance(n, ast.Compare) and any(isinstance(op, (ast.In, ast.NotIn)) for op in n.ops) for n in nodes
+    ),
+    "subset": lambda nodes, calls: "issubset" in calls or any(
+        isinstance(n, ast.Compare) and any(isinstance(op, (ast.LtE, ast.GtE)) for op in n.ops) for n in nodes
+    ),
+    "method": lambda nodes, calls: _has_method(nodes),
+    "raise": lambda nodes, calls: any(isinstance(n, ast.Raise) for n in nodes),
     "except_value_error": lambda nodes, calls: any(
         isinstance(n, ast.ExceptHandler) and isinstance(n.type, ast.Name) and n.type.id == "ValueError"
         for n in nodes
@@ -850,6 +902,13 @@ REQUIREMENT_LABELS: dict[str, str] = {
     "class": "định nghĩa class",
     "decorator": "decorator @...",
     "closure": "closure (hàm trả về hàm bên trong)",
+    "boolop": "and / or",
+    "nested_for": "vòng lặp for lồng nhau",
+    "subscript": "lấy phần tử theo vị trí [i]",
+    "membership": "toán tử in",
+    "subset": "kiểm tra tập con (issubset hoặc <=)",
+    "method": "phương thức tự viết trong class",
+    "raise": "lệnh raise",
     "except_value_error": "except ValueError",
 }
 
@@ -866,6 +925,8 @@ def requirement_label(requirement: str) -> str:
             parts.append(f"phương thức {option[7:]}")
         elif option.startswith("op:"):
             parts.append(f"toán tử {option[3:]}")
+        elif option.startswith("except:"):
+            parts.append(f"except {option[7:]}")
         else:
             parts.append(REQUIREMENT_LABELS[option])
     return " hoặc ".join(parts)
@@ -1010,6 +1071,1180 @@ def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
     if missing:
         return "Màn này yêu cầu dùng: " + ", ".join(missing) + "."
     return None
+
+
+# ======================================================================
+# levels_practice.py
+# ======================================================================
+
+def corridor(inner: str) -> list[str]:
+    """One-row corridor map surrounded by walls."""
+    wall = "#" * (len(inner) + 2)
+    return [wall, f"#{inner}#", wall]
+
+
+DOOR_RIGHT = corridor("@.GD.GE")
+DOOR_DOWN = [
+    "#######",
+    "#@..###",
+    "###.###",
+    "###D###",
+    "###G###",
+    "###E###",
+    "#######",
+]
+STAIRS = [
+    "#######",
+    "#@G####",
+    "##.G###",
+    "###.G##",
+    "####.G#",
+    "#####E#",
+    "#######",
+]
+WEAPON_ROOM = [
+    "###########",
+    "#@..r..b..#",
+    "#.........#",
+    "#....c...E#",
+    "###########",
+]
+
+PRACTICE: dict[int, list[Level]] = {}
+
+# ================================================================ GIAI ĐOẠN 1
+PRACTICE[1] = [
+    Level(
+        id="1-4",
+        title="Đường zigzag",
+        story="Đường đi như bậc thang: sang phải 1 ô, xuống 1 ô, cứ thế lặp lại.",
+        goal="Đi theo đường zigzag, nhặt 2 viên ngọc và tới cúp.",
+        rows=[
+            "#######",
+            "#@.####",
+            "##.G###",
+            "###.G##",
+            "####.E#",
+            "#######",
+        ],
+        starter="hero.move_right()\nhero.move_down()\n# viết tiếp\n",
+        hints=["Không ghi số trong ngoặc thì hero đi 1 bước.", "Đếm xem cần mấy lần sang phải, mấy lần đi xuống."],
+    ),
+    Level(
+        id="1-5",
+        title="Đường vòng chữ U",
+        story="Bức tường chắn ngay trước mặt. Hero phải đi vòng xuống dưới rồi mới lên được cúp.",
+        goal="Đi vòng qua tường, nhặt ngọc, tới cúp rồi nói \"Đến rồi!\".",
+        rows=[
+            "#########",
+            "#@#####E#",
+            "#.#####.#",
+            "#...G...#",
+            "#########",
+        ],
+        starter="hero.move_down(2)\n",
+        hints=["Đường đi gồm 3 đoạn: xuống, sang phải, lên.", "Lệnh say đặt ở cuối, sau khi tới cúp."],
+        requires=["call:say"],
+        say_contains="Đến rồi",
+    ),
+]
+
+PRACTICE[2] = [
+    Level(
+        id="2-3",
+        title="Biến thay đổi",
+        story="Giá trị trong biến có thể thay đổi: steps = steps - 1 nghĩa là lấy giá trị cũ trừ 1 rồi cất lại.",
+        goal="Dùng MỘT biến steps cho cả hai đoạn đường: đi phải 3, rồi giảm steps đi 1 và đi xuống.",
+        rows=[
+            "######",
+            "#@.G.#",
+            "####.#",
+            "####E#",
+            "######",
+        ],
+        starter="steps = 3\nhero.move_right(steps)\n# đổi steps rồi đi xuống\n",
+        hints=["Gán lại steps bằng giá trị cũ trừ đi 1.", "Đoạn đi xuống dài 2 ô."],
+        requires=["assign"],
+    ),
+    Level(
+        id="2-4",
+        title="Thẻ học sinh",
+        story="Biến có sẵn: name = \"Mai\" (chuỗi) và age = 12 (số). Muốn ghép số vào chuỗi phải đổi số sang chuỗi bằng str().",
+        goal="Nói \"Mai 12 tuổi\" bằng cách ghép name và age, rồi tới cúp.",
+        rows=corridor("@..G..E"),
+        starter='# name = "Mai", age = 12\nhero.say(name)\nhero.move_right(6)\n',
+        hints=["Dùng dấu + để nối các chuỗi, nhớ có dấu cách giữa các phần.", "age là số, cần str(age)."],
+        requires=["call:str"],
+        extra_globals={"name": "Mai", "age": 12},
+        say_contains="Mai 12 tuổi",
+    ),
+    Level(
+        id="2-5",
+        title="Chia kẹo",
+        story=(
+            "Có gems = 17 viên kẹo chia đều cho friends = 5 bạn. "
+            "Phép // cho phần nguyên (mỗi bạn được mấy viên), phép % cho phần dư."
+        ),
+        goal="Nói \"3 dư 2\" (mỗi bạn được bao nhiêu, còn dư bao nhiêu) rồi tới cúp.",
+        rows=corridor("@.G..E"),
+        starter="# gems = 17, friends = 5\neach = gems / friends\nhero.say(each)\nhero.move_right(5)\n",
+        hints=["Phép / cho kết quả số thực 3.4 - cần phép chia lấy phần nguyên.", "Phần dư dùng phép %."],
+        requires=["assign"],
+        extra_globals={"gems": 17, "friends": 5},
+        say_contains="3 dư 2",
+    ),
+]
+
+PRACTICE[3] = [
+    Level(
+        id="3-3",
+        title="Mua vé",
+        story="Vé vào cổng giá 5 xu, hero có coins = 7 xu. So sánh >= nghĩa là \"lớn hơn hoặc bằng\".",
+        goal="Nếu đủ tiền mua vé thì nói \"Đủ tiền\", không thì nói \"Thiếu tiền\". Rồi tới cúp.",
+        rows=corridor("@..G.E"),
+        starter=(
+            "# coins = 7, vé vào cổng giá 5\n"
+            "if coins >= 10:\n"
+            '    hero.say("Đủ tiền")\n'
+            "else:\n"
+            '    hero.say("Thiếu tiền")\n'
+            "hero.move_right(5)\n"
+        ),
+        hints=["Điều kiện đang so sánh với sai giá vé.", "Vé giá 5 xu."],
+        requires=["if"],
+        extra_globals={"coins": 7},
+        say_contains="Đủ tiền",
+    ),
+    Level(
+        id="3-4",
+        title="Ngã ba thứ hai",
+        story="Lần này gai có thể ở trên hoặc ở dưới. elif cho phép kiểm tra thêm một điều kiện khác.",
+        goal="Ở ngã ba, đi về phía KHÔNG có gai, nhặt ngọc rồi tới cúp.",
+        rows=[
+            "#######",
+            "###GE##",
+            "#@..###",
+            "###^###",
+            "#######",
+        ],
+        starter=(
+            "hero.move_right(2)\n"
+            'if hero.look("up") == "spike":\n'
+            "    hero.move_down()\n"
+        ),
+        hints=["Hãy kiểm tra cả phía dưới: nếu dưới có gai thì đi lên.", "Sau khi rẽ, đi phải 1 ô là tới cúp."],
+        requires=["if"],
+    ),
+    Level(
+        id="3-5",
+        title="Hai điều kiện",
+        story="and: cả hai điều kiện đều đúng. or: chỉ cần một điều kiện đúng. hero.hp là số máu hiện tại.",
+        goal="Chỉ tấn công khi bên phải là quái VÀ hero còn nhiều hơn 1 máu. Rồi tới cúp.",
+        rows=corridor("@..r..E"),
+        starter="hero.move_right(2)\nif hero.hp > 1:\n    pass\n",
+        hints=["Ghép hai điều kiện bằng and trong cùng một câu if.", "Hạ quái xong, đi phải 4 ô."],
+        requires=["if", "boolop"],
+    ),
+]
+
+PRACTICE[4] = [
+    Level(
+        id="4-4",
+        title="Bậc thang lớn dần",
+        story="Biến i trong vòng for thay đổi mỗi vòng. range(1, 4) cho i = 1, 2, 3.",
+        goal="Bậc thứ nhất dài 1 ô, bậc thứ hai dài 2 ô, bậc thứ ba dài 3 ô. Dùng i để đi đúng độ dài.",
+        rows=[
+            "#########",
+            "#@.######",
+            "##.G.####",
+            "####..G.#",
+            "#######E#",
+            "#########",
+        ],
+        starter="for i in range(3):\n    print(i)\n",
+        hints=["range(1, 4) bắt đầu từ 1 thay vì 0.", "Mỗi vòng: sang phải i ô rồi xuống 1 ô."],
+        requires=["for"],
+    ),
+    Level(
+        id="4-5",
+        title="Vòng lặp lồng nhau",
+        story=(
+            "Vòng lặp có thể nằm trong vòng lặp. Vòng ngoài đếm bậc thang, vòng trong đi từng bước. "
+            "Lần này bậc thang dài 1, 2, 3, 4 ô."
+        ),
+        goal="Dùng hai vòng for lồng nhau để xuống hết 4 bậc thang.",
+        rows=[
+            "#############",
+            "#@.##########",
+            "##.G.########",
+            "####..G.#####",
+            "#######..G..#",
+            "###########E#",
+            "#############",
+        ],
+        starter="for i in range(1, 5):\n    hero.move_right(i)\n",
+        hints=["Vòng trong lặp i lần, mỗi lần đi 1 bước sang phải.", "Lệnh đi xuống thuộc vòng ngoài (thụt lề ít hơn)."],
+        requires=["nested_for"],
+    ),
+]
+
+PRACTICE[5] = [
+    Level(
+        id="5-3",
+        title="Số có dấu chấm",
+        story="distance = \"7.0\" là chuỗi có dấu chấm. int(\"7.0\") báo lỗi, phải đổi qua float trước.",
+        goal="Đổi distance thành số nguyên đúng cách rồi đi đúng số bước tới cúp.",
+        rows=corridor("@..G...E"),
+        starter='# distance = "7.0"\nhero.move_right(int(distance))\n',
+        hints=["float(\"7.0\") cho ra 7.0.", "Rồi mới đổi số thực sang số nguyên."],
+        requires=["call:float"],
+        extra_globals={"distance": "7.0"},
+    ),
+    Level(
+        id="5-4",
+        title="Số phòng",
+        story="Cửa này cần mật mã là CHUỖI \"Phòng 7\". Biến room = 7 là số.",
+        goal="Ghép chữ \"Phòng \" với room để tạo mật mã, mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter='# room = 7\nhero.move_right(2)\nhero.enter_code("Phòng" + room)\n',
+        hints=["Chuỗi + số sẽ lỗi - đổi số sang chuỗi.", "Đừng quên dấu cách sau chữ Phòng."],
+        requires=["call:str"],
+        extra_globals={"room": 7},
+        door_code="Phòng 7",
+    ),
+    Level(
+        id="5-5",
+        title="Công tắc bật tắt",
+        story=(
+            "switch = \"0\". Cửa cần giá trị True/False (bool). Bẫy: bool(\"0\") là True vì chuỗi không rỗng! "
+            "Số 0 thì bool(0) mới là False."
+        ),
+        goal="Đổi switch sang số rồi sang bool để có đúng trạng thái công tắc, mở cửa, tới cúp.",
+        rows=DOOR_DOWN,
+        starter=(
+            '# switch = "0"\n'
+            "print(bool(switch))  # thử xem\n"
+            "hero.move_right(2)\n"
+            "hero.move_down(1)\n"
+        ),
+        hints=["Đổi sang int trước, rồi mới bool(...).", "Mở cửa xong, đi xuống 3 ô."],
+        requires=["call:bool", "call:int"],
+        extra_globals={"switch": "0"},
+        door_code=False,
+    ),
+]
+
+PRACTICE[6] = [
+    Level(
+        id="6-4",
+        title="Hàm có tham số",
+        story="Tham số giúp một hàm làm việc với nhiều giá trị khác nhau: step(2) và step(3) đi xa khác nhau.",
+        goal="Viết hàm step(n): đi phải n ô rồi xuống n ô. Gọi step(2) rồi step(3) để tới cúp.",
+        rows=[
+            "########",
+            "#@.G####",
+            "###.####",
+            "###.G..#",
+            "######.#",
+            "######.#",
+            "######E#",
+            "########",
+        ],
+        starter="def step(n):\n    hero.move_right(n)\n\nstep(2)\n",
+        hints=["Thêm lệnh đi xuống n ô vào trong hàm.", "Gọi hàm thêm lần nữa với số khác."],
+        requires=["def", "call:step"],
+    ),
+    Level(
+        id="6-5",
+        title="Khoảng cách điểm",
+        story="scores = [7, 9, 4, 10, 6]. max() cho số lớn nhất, min() cho số nhỏ nhất.",
+        goal="Mật mã = điểm cao nhất trừ điểm thấp nhất. Mở cửa và tới cúp.",
+        rows=DOOR_DOWN,
+        starter=(
+            "# scores = [7, 9, 4, 10, 6]\n"
+            "print(sum(scores))\n"
+            "hero.move_right(2)\n"
+            "hero.move_down(1)\n"
+        ),
+        hints=["Dùng cả max và min.", "Mở cửa xong đi xuống 3 ô."],
+        requires=["call:max", "call:min"],
+        extra_globals={"scores": [7, 9, 4, 10, 6]},
+        door_code=6,
+    ),
+]
+
+PRACTICE[7] = [
+    Level(
+        id="7-3",
+        title="Gương soi",
+        story="Mật mã bị viết ngược trong gương: scroll = \"olleh\". Cắt chuỗi với bước -1 sẽ đảo ngược chuỗi.",
+        goal="Đảo ngược scroll để có mật mã, mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter='# scroll = "olleh"\nprint(scroll[0])\nhero.move_right(2)\n',
+        hints=["Cú pháp [đầu:cuối:bước] - để trống đầu và cuối.", "Bước -1 đi từ cuối về đầu."],
+        requires=["slice"],
+        extra_globals={"scroll": "olleh"},
+        door_code="hello",
+    ),
+    Level(
+        id="7-4",
+        title="Chỉ đường",
+        story=(
+            "route = \"2,3,1\" là chỉ đường: phải 2, xuống 3, phải 1. "
+            ".split(\",\") cắt chuỗi tại dấu phẩy thành list các chuỗi nhỏ."
+        ),
+        goal="Tách route, đổi từng phần sang số rồi đi đúng chỉ đường tới cúp.",
+        rows=[
+            "######",
+            "#@.G##",
+            "###.##",
+            "###.##",
+            "###.E#",
+            "######",
+        ],
+        starter='# route = "2,3,1"\nparts = route\nprint(parts)\n',
+        hints=["Sau khi split, parts[0] là phần đầu tiên.", "Mỗi phần vẫn là chuỗi - cần int(...)."],
+        requires=["call:split"],
+        extra_globals={"route": "2,3,1"},
+    ),
+    Level(
+        id="7-5",
+        title="Đếm chữ a",
+        story="message = \"banana bandana\". Chuỗi có hàm .count(\"x\") đếm số lần \"x\" xuất hiện.",
+        goal="Mật mã = số chữ \"a\" trong message. Mở cửa và tới cúp.",
+        rows=DOOR_DOWN,
+        starter=(
+            '# message = "banana bandana"\n'
+            "print(len(message))\n"
+            "hero.move_right(2)\n"
+            "hero.move_down(1)\n"
+        ),
+        hints=["len đếm TẤT CẢ ký tự, kể cả dấu cách.", "Gọi .count trên chính message."],
+        requires=["call:count"],
+        extra_globals={"message": "banana bandana"},
+        door_code=6,
+    ),
+]
+
+PRACTICE[8] = [
+    Level(
+        id="8-3",
+        title="Danh sách bước đi",
+        story="steps = [3, 2, 4]: phải 3, xuống 2, phải 4. steps[0] là phần tử đầu tiên (vị trí 0).",
+        goal="Dùng từng phần tử của steps để đi tới cúp.",
+        rows=[
+            "##########",
+            "#@..G#####",
+            "####.#####",
+            "####...GE#",
+            "##########",
+        ],
+        starter="# steps = [3, 2, 4]\nprint(steps[0])\nprint(len(steps))\n",
+        hints=["Phần tử thứ hai là steps[1].", "Thứ tự: phải, xuống, phải."],
+        requires=["subscript"],
+        extra_globals={"steps": [3, 2, 4]},
+    ),
+    Level(
+        id="8-4",
+        title="Ghi chép vị trí",
+        story="list.append(x) thêm x vào cuối list. Ghi lại cột x của từng viên ngọc trước khi nhặt.",
+        goal="Tạo list các toạ độ x của ngọc, nói list đó ra (ví dụ [2, 4, 6]) rồi tới cúp.",
+        rows=corridor("@G.G.G.E"),
+        starter="xs = []\nfor gem in hero.find_gems():\n    pass\nhero.say(xs)\n",
+        hints=["Trong vòng lặp, thêm gem[\"x\"] vào xs.", "Nói xong thì đi phải 7 ô."],
+        requires=["call:append"],
+        say_contains="[2, 4, 6]",
+    ),
+    Level(
+        id="8-5",
+        title="Các điểm dừng",
+        story="stops là list các tuple (x, y). Duyệt list và mở gói mỗi tuple ngay trong vòng for: for x, y in stops.",
+        goal="Đi lần lượt tới mọi điểm dừng trong stops (điểm cuối là cổng).",
+        rows=[
+            "########",
+            "#@.G####",
+            "###.####",
+            "###G.GE#",
+            "########",
+        ],
+        starter=(
+            "# stops = [(3, 1), (3, 3), (5, 3), (6, 3)]\n"
+            "first = stops[0]\n"
+            "print(first[0], first[1])\n"
+        ),
+        hints=["Vòng for có thể tách mỗi tuple thành 2 biến ngay khi duyệt.", "Mỗi vòng, đi tới toạ độ vừa lấy ra bằng move_to."],
+        requires=["for", "call:move_to"],
+        extra_globals={"stops": [(3, 1), (3, 3), (5, 3), (6, 3)]},
+    ),
+]
+
+PRACTICE[9] = [
+    Level(
+        id="9-3",
+        title="Đi chợ",
+        story="prices = {\"táo\": 5, \"cam\": 7, \"lê\": 4} là bảng giá. basket = [\"táo\", \"lê\", \"táo\"] là giỏ hàng.",
+        goal="Tính tổng tiền giỏ hàng bằng cách tra bảng giá, nhập làm mật mã, tới cúp.",
+        rows=DOOR_RIGHT,
+        starter='# prices, basket có sẵn\nprint(prices["táo"])\nhero.move_right(2)\n',
+        hints=["Duyệt từng món trong giỏ, tra giá trong dict.", "Cộng dồn vào một biến tổng bắt đầu từ 0."],
+        requires=["for"],
+        extra_globals={"prices": {"táo": 5, "cam": 7, "lê": 4}, "basket": ["táo", "lê", "táo"]},
+        door_code=14,
+    ),
+    Level(
+        id="9-4",
+        title="Sổ đếm",
+        story=(
+            "words = [\"mèo\", \"chó\", \"mèo\", \"cá\", \"mèo\"]. Dùng dict làm sổ đếm: "
+            "counts.get(w, 0) trả về số đếm hiện tại, hoặc 0 nếu chưa có."
+        ),
+        goal="Đếm mỗi con vật xuất hiện mấy lần. Mật mã = số lần \"mèo\" xuất hiện.",
+        rows=DOOR_DOWN,
+        starter="counts = {}\nprint(counts)\nhero.move_right(2)\nhero.move_down(1)\n",
+        hints=["Mỗi vòng: counts[w] = số cũ + 1.", "Tra counts[\"mèo\"] để lấy mật mã."],
+        requires=["dict", "for"],
+        extra_globals={"words": ["mèo", "chó", "mèo", "cá", "mèo"]},
+        door_code=3,
+    ),
+    Level(
+        id="9-5",
+        title="Khách tham quan",
+        story="visitors ghi tên khách mỗi lần vào cửa, có người vào nhiều lần. set chỉ giữ tên không trùng.",
+        goal="Mật mã = số NGƯỜI khác nhau đã tới. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="# visitors có sẵn\nprint(len(visitors))\nhero.move_right(2)\n",
+        hints=["len(visitors) đếm cả tên trùng.", "Đổi sang set trước khi đếm."],
+        requires=["set"],
+        extra_globals={"visitors": ["An", "Bình", "An", "Chi", "Bình", "An"]},
+        door_code=3,
+    ),
+]
+
+PRACTICE[10] = [
+    Level(
+        id="10-3",
+        title="Tổng bình phương",
+        story="numbers = [1, 2, 3, 4]. List comprehension tạo list mới từ list cũ trong 1 dòng.",
+        goal="Tạo list bình phương các số bằng comprehension, mật mã = tổng của list đó.",
+        rows=DOOR_RIGHT,
+        starter="squares = []\nprint(numbers)\nhero.move_right(2)\n",
+        hints=["[biểu_thức for n in numbers]", "Bình phương của n là n * n."],
+        requires=["listcomp"],
+        extra_globals={"numbers": [1, 2, 3, 4]},
+        door_code=30,
+    ),
+    Level(
+        id="10-4",
+        title="Bảng số",
+        story="table = [[1, 2], [3, 4], [5, 6]] là list lồng nhau. Comprehension có thể có 2 vòng for.",
+        goal="Cộng mọi số trong table, nhập tổng làm mật mã, tới cúp.",
+        rows=DOOR_DOWN,
+        starter="print(table[0])\nprint(table[2][1])\nhero.move_right(2)\nhero.move_down(1)\n",
+        hints=["Vòng for ngoài duyệt hàng, vòng trong duyệt số trong hàng.", "Tính sum của list vừa trải phẳng."],
+        requires=["listcomp"],
+        extra_globals={"table": [[1, 2], [3, 4], [5, 6]]},
+        door_code=21,
+    ),
+    Level(
+        id="10-5",
+        title="Dò bản đồ",
+        story=(
+            "hero.scan() trả về bản đồ grid[y][x]. enumerate(list) cho cả vị trí lẫn phần tử. "
+            "Lần này không dùng find_gems - hãy tự tìm toạ độ ngọc từ bản đồ."
+        ),
+        goal="Tìm toạ độ mọi ô \"gem\" bằng comprehension trên bản đồ, đi nhặt hết rồi tới cổng.",
+        rows=[
+            "#########",
+            "#@..#..G#",
+            "#.#...#.#",
+            "#G..#..E#",
+            "#########",
+        ],
+        starter="grid = hero.scan()\nprint(grid[1][7])\n",
+        hints=[
+            "Duyệt for y, row in enumerate(grid) rồi for x, tile in enumerate(row).",
+            "Giữ lại (x, y) khi tile == \"gem\", sau đó move_to từng điểm.",
+        ],
+        requires=["listcomp", "call:scan"],
+    ),
+]
+
+# ================================================================ GIAI ĐOẠN 2
+PRACTICE[11] = [
+    Level(
+        id="11-2",
+        title="Ai vắng mặt",
+        story=(
+            "invited là danh sách bạn được mời, came là những bạn đã tới. "
+            "Hiệu tập hợp a - b gồm phần tử có trong a nhưng KHÔNG có trong b."
+        ),
+        goal="Mật mã = số bạn được mời mà chưa tới. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="# invited, came có sẵn\nprint(set(invited))\nhero.move_right(2)\n",
+        hints=["Đổi cả hai list sang set.", "Lấy tập được mời trừ tập đã tới, rồi đếm."],
+        requires=["op:- or call:difference"],
+        extra_globals={"invited": ["An", "Bình", "Chi", "Dũng", "Hà"], "came": ["Bình", "Hà", "An"]},
+        door_code=2,
+    ),
+    Level(
+        id="11-3",
+        title="Soát vé",
+        story=(
+            "tickets là các vé khách đưa ra, valid là tập các mã vé hợp lệ. "
+            "Toán tử in kiểm tra một giá trị có nằm trong tập hay không - với set rất nhanh."
+        ),
+        goal="Đếm số vé hợp lệ (tính cả vé trùng), nhập làm mật mã, tới cúp.",
+        rows=DOOR_DOWN,
+        starter='# tickets (list), valid (set) có sẵn\nprint("A12" == "A12")\nhero.move_right(2)\nhero.move_down(1)\n',
+        hints=["Duyệt từng vé, dùng if ... in valid.", "Cộng dồn số vé hợp lệ vào một biến đếm."],
+        requires=["membership"],
+        extra_globals={"tickets": ["A12", "B07", "A12", "C33", "B07"], "valid": {"A12", "C33"}},
+        door_code=3,
+    ),
+    Level(
+        id="11-4",
+        title="Sticker độc nhất",
+        story=(
+            "An và Bình sưu tầm sticker. Hiệu đối xứng a ^ b gồm phần tử chỉ có ở MỘT trong hai người "
+            "(bỏ những cái cả hai cùng có)."
+        ),
+        goal="Mật mã = số sticker chỉ một trong hai bạn có. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="a = set(stickers_an)\nb = set(stickers_binh)\nprint(a & b)\nhero.move_right(2)\n",
+        hints=["a & b là phần CẢ HAI có - không phải thứ cần tìm.", "Dùng toán tử ^ rồi đếm."],
+        requires=["op:^ or call:symmetric_difference"],
+        extra_globals={"stickers_an": [1, 2, 3, 4], "stickers_binh": [3, 4, 5]},
+        door_code=3,
+    ),
+    Level(
+        id="11-5",
+        title="Kiểm tra ba lô",
+        story=(
+            "Đi thám hiểm cần đủ các món trong required = {\"key\", \"map\"}. "
+            "a <= b (hoặc a.issubset(b)) cho biết a có nằm trọn trong b không."
+        ),
+        goal="Nếu ba lô có đủ đồ cần thiết thì nói \"Đủ đồ\", không thì \"Thiếu đồ\". Rồi tới cúp.",
+        rows=corridor("@..G..E"),
+        starter=(
+            "# required (set), backpack (list) có sẵn\n"
+            "if len(backpack) > 5:\n"
+            '    hero.say("Đủ đồ")\n'
+            "else:\n"
+            '    hero.say("Thiếu đồ")\n'
+            "hero.move_right(6)\n"
+        ),
+        hints=[
+            "Số món nhiều hay ít không quan trọng - quan trọng là có đủ món cần thiết không.",
+            "Đổi backpack sang set rồi kiểm tra tập con.",
+        ],
+        requires=["if", "subset"],
+        extra_globals={"required": {"key", "map"}, "backpack": ["map", "rope", "key", "torch"]},
+        say_contains="Đủ đồ",
+    ),
+]
+
+PRACTICE[12] = [
+    Level(
+        id="12-3",
+        title="Thuê xe buýt",
+        story="Có students = 45 học sinh, mỗi xe chở seats = 16 bạn. Thiếu chỗ là không được - phải làm tròn LÊN.",
+        goal="Tính số xe cần thuê bằng math.ceil, nhập làm mật mã, tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="import math\n# students = 45, seats = 16\nprint(students / seats)\nhero.move_right(2)\n",
+        hints=["45 / 16 = 2.8125 - không thể thuê 2.8 xe.", "math.ceil làm tròn lên."],
+        requires=["call:ceil"],
+        extra_globals={"students": 45, "seats": 16},
+        door_code=3,
+    ),
+    Level(
+        id="12-4",
+        title="Sân tròn",
+        story="Sân chơi hình tròn bán kính r = 5 m. Diện tích = π × r². round() làm tròn tới số nguyên gần nhất.",
+        goal="Tính diện tích sân, làm tròn thành số nguyên, nhập làm mật mã, tới cúp.",
+        rows=DOOR_DOWN,
+        starter="import math\n# r = 5\nprint(r ** 2)\nhero.move_right(2)\nhero.move_down(1)\n",
+        hints=["Dùng math.pi cho số π.", "round(...) để ra số nguyên."],
+        requires=["import:math"],
+        extra_globals={"r": 5},
+        door_code=79,
+    ),
+    Level(
+        id="12-5",
+        title="Chọn đội trực nhật",
+        story=(
+            "Tổ có 6 bạn, cần chọn 2 bạn trực nhật (không quan tâm thứ tự). "
+            "math.comb(n, k) đếm số cách chọn k người trong n người."
+        ),
+        goal="Mật mã = số cách chọn 2 bạn trong 6 bạn. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="import math\nprint(math.factorial(3))\nhero.move_right(2)\n",
+        hints=["comb = combination = tổ hợp.", "Truyền vào số bạn và số cần chọn."],
+        requires=["call:comb or call:factorial"],
+        door_code=15,
+    ),
+]
+
+PRACTICE[13] = [
+    Level(
+        id="13-3",
+        title="Bao nhiêu cách xếp",
+        story="letters = \"ABCD\". permutations cũng dùng được với chuỗi. list(...) gom tất cả, len(...) để đếm.",
+        goal="Mật mã = số cách sắp xếp 4 chữ cái A, B, C, D. Mở cửa và tới cúp.",
+        rows=DOOR_DOWN,
+        starter='from itertools import permutations\nprint(list(permutations("AB")))\nhero.move_right(2)\nhero.move_down(1)\n',
+        hints=["Đếm số phần tử permutations sinh ra.", "4 vật có 4 × 3 × 2 × 1 cách xếp - hãy kiểm tra lại bằng code."],
+        requires=["call:permutations"],
+        extra_globals={"letters": "ABCD"},
+        door_code=24,
+    ),
+    Level(
+        id="13-4",
+        title="Phối đồ",
+        story=(
+            "shirts = [\"đỏ\", \"xanh\"], pants = [\"đen\", \"trắng\", \"nâu\"]. "
+            "product(a, b) ghép MỌI phần tử của a với MỌI phần tử của b."
+        ),
+        goal="Mật mã = số bộ quần áo phối được. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter='from itertools import product\nfor combo in product([1, 2], ["x"]):\n    print(combo)\n',
+        hints=["Ghép shirts với pants bằng product.", "Gom vào list rồi đếm."],
+        requires=["call:product"],
+        extra_globals={"shirts": ["đỏ", "xanh"], "pants": ["đen", "trắng", "nâu"]},
+        door_code=6,
+    ),
+    Level(
+        id="13-5",
+        title="Cặp xu",
+        story="coins = [1, 2, 5, 10]. Chọn 2 đồng xu khác nhau. Có bao nhiêu cặp có tổng từ 7 trở lên?",
+        goal="Đếm các cặp xu có tổng >= 7, nhập làm mật mã, tới cúp.",
+        rows=DOOR_DOWN,
+        starter="from itertools import combinations\nprint(list(combinations([1, 2, 5], 2)))\n",
+        hints=["Duyệt combinations(coins, 2) và kiểm tra tổng.", "Đếm số cặp thoả điều kiện."],
+        requires=["call:combinations"],
+        extra_globals={"coins": [1, 2, 5, 10]},
+        door_code=4,
+    ),
+]
+
+PRACTICE[14] = [
+    Level(
+        id="14-3",
+        title="Phân loại thực phẩm",
+        story=(
+            "foods là list các cặp (loại, tên). defaultdict(list) tự tạo list rỗng cho loại mới, "
+            "nên có thể append ngay mà không lỗi."
+        ),
+        goal="Gom món ăn theo loại. Mật mã = số món thuộc loại \"quả\". Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter='from collections import defaultdict\ngroups = defaultdict(list)\nprint(groups["rau"])\n',
+        hints=["Duyệt từng cặp (loại, tên) và thêm tên vào đúng nhóm.", "Đếm số phần tử trong nhóm \"quả\"."],
+        requires=["call:defaultdict"],
+        extra_globals={
+            "foods": [("rau", "cải"), ("quả", "táo"), ("rau", "muống"), ("quả", "cam"), ("quả", "lê")],
+        },
+        door_code=3,
+    ),
+    Level(
+        id="14-4",
+        title="Bầu lớp trưởng",
+        story="votes là các phiếu bầu. Mật mã là TÊN người được nhiều phiếu nhất.",
+        goal="Dùng Counter tìm người thắng cử, nhập tên làm mật mã, tới cúp.",
+        rows=DOOR_DOWN,
+        starter="from collections import Counter\nprint(len(votes))\nhero.move_right(2)\nhero.move_down(1)\n",
+        hints=["most_common(1) cho list có một tuple (tên, số phiếu).", "Mật mã là phần tên trong tuple."],
+        requires=["call:Counter"],
+        extra_globals={"votes": ["Lan", "Minh", "Lan", "Hoa", "Minh", "Lan"]},
+        door_code="Lan",
+    ),
+    Level(
+        id="14-5",
+        title="Ba lần gần nhất",
+        story=(
+            "scores = [5, 8, 2, 9, 4] là điểm các lần chơi. deque(maxlen=3) chỉ giữ 3 phần tử MỚI NHẤT - "
+            "thêm phần tử thứ 4 thì phần tử cũ nhất tự bị bỏ."
+        ),
+        goal="Mật mã = tổng điểm 3 lần chơi gần nhất. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="from collections import deque\nrecent = deque(maxlen=3)\nprint(recent)\n",
+        hints=["Có thể tạo deque thẳng từ scores với maxlen=3.", "Cộng các phần tử còn lại trong deque."],
+        requires=["call:deque"],
+        extra_globals={"scores": [5, 8, 2, 9, 4]},
+        door_code=15,
+    ),
+]
+
+PRACTICE[15] = [
+    Level(
+        id="15-2",
+        title="Thứ mấy",
+        story=(
+            "day = \"2026-09-05\" là ngày khai giảng. ngay.weekday() cho thứ trong tuần: "
+            "0 = thứ Hai, 1 = thứ Ba, ..., 6 = Chủ nhật."
+        ),
+        goal="Mật mã = kết quả weekday() của ngày khai giảng. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="from datetime import date\nprint(date.fromisoformat(day))\nhero.move_right(2)\n",
+        hints=["Đổi day thành date trước.", "Gọi .weekday() trên ngày đó."],
+        requires=["call:weekday"],
+        extra_globals={"day": "2026-09-05"},
+        door_code=5,
+    ),
+    Level(
+        id="15-3",
+        title="Hạn nộp bài",
+        story=(
+            "Dự án bắt đầu start = \"2026-01-01\" và phải nộp sau 45 ngày. "
+            "Ngày + timedelta(days=45) cho ra ngày mới. str(ngay) cho dạng \"năm-tháng-ngày\"."
+        ),
+        goal="Mật mã = ngày nộp bài dạng chuỗi \"năm-tháng-ngày\". Mở cửa và tới cúp.",
+        rows=DOOR_DOWN,
+        starter="from datetime import date, timedelta\nprint(timedelta(days=1))\nhero.move_right(2)\nhero.move_down(1)\n",
+        hints=["Cộng một timedelta vào ngày bắt đầu.", "Mật mã là chuỗi - đổi ngày sang str."],
+        requires=["call:timedelta"],
+        extra_globals={"start": "2026-01-01"},
+        door_code="2026-02-15",
+    ),
+    Level(
+        id="15-4",
+        title="Mấy tuần ôn thi",
+        story="Ôn thi từ start = \"2026-03-02\" tới end = \"2026-05-25\". Một tuần có 7 ngày.",
+        goal="Mật mã = số tuần ôn thi (số ngày chia lấy phần nguyên cho 7). Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="from datetime import date\nhero.move_right(2)\n",
+        hints=["Trừ hai ngày rồi lấy .days.", "Dùng phép chia lấy phần nguyên cho 7."],
+        requires=["import:datetime"],
+        extra_globals={"start": "2026-03-02", "end": "2026-05-25"},
+        door_code=12,
+    ),
+    Level(
+        id="15-5",
+        title="Viết ngày kiểu Việt Nam",
+        story=(
+            "day = \"2026-11-20\". Người Việt viết ngày/tháng/năm. ngay.strftime(\"%d/%m/%Y\") định dạng lại: "
+            "%d là ngày, %m là tháng, %Y là năm."
+        ),
+        goal="Mật mã = ngày Nhà giáo Việt Nam viết dạng \"ngày/tháng/năm\". Mở cửa và tới cúp.",
+        rows=DOOR_DOWN,
+        starter="from datetime import date\nprint(date.fromisoformat(day))\nhero.move_right(2)\nhero.move_down(1)\n",
+        hints=["Đổi day thành date rồi gọi strftime.", "Mẫu định dạng dùng dấu / giữa các phần."],
+        requires=["call:strftime"],
+        extra_globals={"day": "2026-11-20"},
+        door_code="20/11/2026",
+    ),
+]
+
+# ================================================================ GIAI ĐOẠN 3
+GROWING_STAIRS = [
+    "#########",
+    "#@.######",
+    "##.G.####",
+    "####..G.#",
+    "#######E#",
+    "#########",
+]
+SPIKE_HOPS = [
+    "#############",
+    "#...G..G..G.#",
+    "#@..^..^..^E#",
+    "#############",
+]
+
+PRACTICE[16] = [
+    Level(
+        id="16-4",
+        title="Phép chia nguy hiểm",
+        story=(
+            "pairs = [(10, 2), (5, 0), (9, 3)]. Chia cho 0 gây lỗi ZeroDivisionError. "
+            "Hãy bỏ qua cặp chia cho 0 và cộng kết quả các cặp còn lại (dùng phép //)."
+        ),
+        goal="Mật mã = tổng a // b của các cặp chia được. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="total = 0\nfor a, b in pairs:\n    total += a // b\nprint(total)\n",
+        hints=["Bọc phép chia trong try.", "Bắt đúng loại lỗi chia cho 0."],
+        requires=["try", "except:ZeroDivisionError"],
+        extra_globals={"pairs": [(10, 2), (5, 0), (9, 3)]},
+        door_code=8,
+    ),
+    Level(
+        id="16-5",
+        title="Tự báo lỗi",
+        story=(
+            "moves = [3, -1, 4] là số bước cần đi, nhưng số bước âm là dữ liệu hỏng. "
+            "Lệnh raise ValueError(\"...\") tự tạo ra lỗi - nơi gọi hàm sẽ bắt lỗi đó bằng try/except."
+        ),
+        goal="Viết hàm check(n) báo lỗi ValueError khi n âm. Đi theo các bước hợp lệ và bỏ qua bước hỏng.",
+        rows=corridor("@..G...E"),
+        starter="def check(n):\n    return n\n\nfor n in moves:\n    hero.move_right(check(n))\n",
+        hints=["Trong check: nếu n nhỏ hơn 0 thì raise, ngược lại trả về n.", "Bọc lời gọi check trong try/except ValueError."],
+        requires=["raise", "try"],
+        extra_globals={"moves": [3, -1, 4]},
+    ),
+]
+
+PRACTICE[17] = [
+    Level(
+        id="17-4",
+        title="Chiếc ví",
+        story=(
+            "Phương thức là hàm viết BÊN TRONG class, luôn có self là tham số đầu tiên. "
+            "coins = [5, 10, 2] là các đồng xu nhặt được."
+        ),
+        goal="Thêm phương thức add(amount) cho class Wallet, bỏ hết xu vào ví. Mật mã = tổng tiền trong ví.",
+        rows=DOOR_RIGHT,
+        starter="class Wallet:\n    def __init__(self):\n        self.total = 0\n\nw = Wallet()\nprint(w.total)\n",
+        hints=["add(self, amount) cộng amount vào self.total.", "Duyệt coins và gọi w.add(...) cho từng đồng."],
+        requires=["class", "method"],
+        extra_globals={"coins": [5, 10, 2]},
+        door_code=17,
+    ),
+    Level(
+        id="17-5",
+        title="Đội của tôi",
+        story=(
+            "Magic method __len__ quy định kết quả của len(doi_tuong). "
+            "members = [\"An\", \"Bình\", \"Chi\", \"Dũng\"]."
+        ),
+        goal="Viết __len__ cho class Team trả về số thành viên, rồi nhập len(team) làm mật mã.",
+        rows=DOOR_DOWN,
+        starter=(
+            "class Team:\n"
+            "    def __init__(self, members):\n"
+            "        self.members = members\n"
+            "\n"
+            "team = Team(members)\n"
+            "print(team.members)\n"
+        ),
+        hints=["__len__(self) phải return một số nguyên.", "Số thành viên chính là độ dài list self.members."],
+        requires=["dunder:__len__"],
+        extra_globals={"members": ["An", "Bình", "Chi", "Dũng"]},
+        door_code=4,
+    ),
+]
+
+PRACTICE[18] = [
+    Level(
+        id="18-2",
+        title="Kho vũ khí",
+        story=(
+            "Ôn tập: dict vũ khí, vòng lặp và cửa kẹt. Quái: robot → hammer, barrel → axe, cannon → bow. "
+            "Cửa kẹt ở ngay trên cúp."
+        ),
+        goal="Hạ hết quái bằng đúng vũ khí, tới đứng trên cửa kẹt, mở cửa rồi xuống cúp.",
+        rows=[
+            "############",
+            "#@..b...r..#",
+            "#..c.......#",
+            "##########J#",
+            "##########E#",
+            "############",
+        ],
+        starter=(
+            'weakness = {"robot": "hammer", "barrel": "axe", "cannon": "bow"}\n'
+            "for enemy in hero.find_enemies():\n"
+            '    print(enemy["type"], enemy["x"], enemy["y"])\n'
+        ),
+        hints=[
+            "Ô ngay trên cửa kẹt là (10, 2) - dùng move_to để tới đó sau khi hạ quái.",
+            "Cửa kẹt nằm phía dưới hero: thử mở nhiều lần bằng try/except.",
+        ],
+        requires=["dict", "for", "try"],
+        jams=2,
+        weapons=True,
+        kill_all=True,
+    ),
+    Level(
+        id="18-3",
+        title="Lọc chữ số",
+        story="scroll = \"x7y3z9\". Mật mã = tổng các chữ số trong cuộn giấy. Hãy viết một hàm trả về list các chữ số.",
+        goal="Viết hàm digits(text) dùng comprehension, mật mã = tổng các chữ số. Mở cửa, tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="def digits(text):\n    return []\n\nprint(digits(scroll))\nhero.move_right(2)\n",
+        hints=["Duyệt từng ký tự, giữ ký tự .isdigit() và đổi sang int.", "Cộng list trả về bằng sum."],
+        requires=["def", "listcomp"],
+        extra_globals={"scroll": "x7y3z9"},
+        door_code=19,
+    ),
+    Level(
+        id="18-4",
+        title="Lộ trình bậc thang",
+        story=(
+            "Ôn tập class và __iter__. Route(size) là lộ trình bậc thang lớn dần: "
+            "bậc i gồm i lần \"right\" rồi một \"down\", với i từ 1 tới size."
+        ),
+        goal="Viết __iter__ cho Route, rồi cho hero follow Route(3) để tới cúp.",
+        rows=GROWING_STAIRS,
+        starter=(
+            "class Route:\n"
+            "    def __init__(self, size):\n"
+            "        self.size = size\n"
+            "\n"
+            'hero.follow(["right", "down"])\n'
+        ),
+        hints=["Tạo list các hướng trong __iter__ bằng vòng lặp, rồi trả về iter(list).", "List nhân số: [\"right\"] * i."],
+        requires=["class", "dunder:__iter__"],
+    ),
+    Level(
+        id="18-5",
+        title="Phòng bẫy số",
+        story=(
+            "candidates = [\"4\", \"x\", \"4\", \"7\", \"??\", \"2\"]. Một số chuỗi không phải số, và có số bị lặp. "
+            "Mật mã = tổng các số KHÁC NHAU đọc được."
+        ),
+        goal="Đổi các chuỗi đọc được sang số (bỏ qua chuỗi hỏng), loại số trùng, mật mã = tổng.",
+        rows=DOOR_DOWN,
+        starter="values = []\nfor text in candidates:\n    values.append(int(text))\n",
+        hints=["Bắt lỗi ValueError khi đổi kiểu.", "Dùng set để không cộng trùng."],
+        requires=["try", "set"],
+        extra_globals={"candidates": ["4", "x", "4", "7", "??", "2"]},
+        door_code=13,
+    ),
+]
+
+# ================================================================ GIAI ĐOẠN 4
+PRACTICE[19] = [
+    Level(
+        id="19-3",
+        title="Người giỏi nhất",
+        story=(
+            "players = [(\"An\", 7), (\"Bình\", 9), (\"Chi\", 5)]. max(ds, key=...) và sorted(ds, key=...) "
+            "nhận một hàm cho biết so sánh theo cái gì - rất hợp với lambda."
+        ),
+        goal="Tìm người có điểm cao nhất bằng lambda, nhập TÊN người đó làm mật mã, tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="print(sorted(players))\nhero.move_right(2)\n",
+        hints=["sorted(players) đang xếp theo tên - cần xếp theo điểm.", "key=lambda p: ... lấy phần tử thứ hai của tuple."],
+        requires=["lambda", "call:sorted or call:max"],
+        extra_globals={"players": [("An", 7), ("Bình", 9), ("Chi", 5)]},
+        door_code="Bình",
+    ),
+    Level(
+        id="19-4",
+        title="Lần rẽ đầu tiên",
+        story=(
+            "route = [\"right\", \"right\", \"down\", \"down\", \"right\"]. "
+            "enumerate(ds) cho từng cặp (vị trí, phần tử), vị trí đếm từ 0."
+        ),
+        goal="Mật mã = vị trí của \"down\" ĐẦU TIÊN trong route. Mở cửa và tới cúp.",
+        rows=DOOR_DOWN,
+        starter="for step in route:\n    print(step)\n",
+        hints=["Duyệt for i, step in enumerate(route).", "Gặp \"down\" đầu tiên thì ghi nhớ vị trí và dừng vòng lặp."],
+        requires=["call:enumerate"],
+        extra_globals={"route": ["right", "right", "down", "down", "right"]},
+        door_code=2,
+    ),
+    Level(
+        id="19-5",
+        title="Dự báo thời tiết",
+        story=(
+            "temps = [22, 25, 31, 28] là nhiệt độ các ngày. any(...) đúng nếu CÓ ÍT NHẤT MỘT phần tử đúng, "
+            "all(...) đúng nếu TẤT CẢ đều đúng."
+        ),
+        goal="Nếu có ngày nào trên 30 độ thì nói \"Nóng\", không thì \"Mát\". Rồi tới cúp.",
+        rows=corridor("@..G.E"),
+        starter='if temps[0] > 30:\n    hero.say("Nóng")\nelse:\n    hero.say("Mát")\nhero.move_right(5)\n',
+        hints=["Đang chỉ xét ngày đầu tiên.", "Đưa một biểu thức t > 30 cho mọi t vào any(...)."],
+        requires=["call:any or call:all"],
+        extra_globals={"temps": [22, 25, 31, 28]},
+        say_contains="Nóng",
+    ),
+]
+
+PRACTICE[20] = [
+    Level(
+        id="20-3",
+        title="Đếm ngọc trong thư",
+        story="letter = \"Ngọc: 3 đỏ, 5 xanh, 2 vàng\". re.findall trả về list MỌI chỗ khớp mẫu.",
+        goal="Lấy mọi con số trong thư, mật mã = tổng của chúng. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter='import re\nprint(re.search(r"\\d+", letter).group())\nhero.move_right(2)\n',
+        hints=["re.search chỉ tìm chỗ đầu tiên.", "Kết quả findall là list chuỗi - đổi sang int trước khi cộng."],
+        requires=["call:findall"],
+        extra_globals={"letter": "Ngọc: 3 đỏ, 5 xanh, 2 vàng"},
+        door_code=10,
+    ),
+    Level(
+        id="20-4",
+        title="Mã hợp lệ",
+        story=(
+            "codes = [\"AB-123\", \"X-1\", \"CD-456\", \"EF-78\"]. Mã hợp lệ gồm 2 chữ in hoa, dấu -, rồi đúng 3 chữ số. "
+            "Mẫu: [A-Z]{2} là 2 chữ in hoa, \\d{3} là 3 chữ số. re.fullmatch khớp TOÀN BỘ chuỗi."
+        ),
+        goal="Đếm số mã hợp lệ, nhập làm mật mã, tới cúp.",
+        rows=DOOR_DOWN,
+        starter="import re\nprint(len(codes))\nhero.move_right(2)\nhero.move_down(1)\n",
+        hints=["Ghép mẫu: [A-Z]{2}, dấu -, \\d{3}.", "fullmatch trả về None nếu không khớp - dùng được trong if."],
+        requires=["call:fullmatch or call:match"],
+        extra_globals={"codes": ["AB-123", "X-1", "CD-456", "EF-78"]},
+        door_code=2,
+    ),
+    Level(
+        id="20-5",
+        title="Lệnh tác chiến XML",
+        story=(
+            "room_xml ghi vị trí từng quái và vũ khí cần dùng: <enemy x=\"..\" y=\"..\" weapon=\"..\"/>, "
+            "cùng vị trí cổng <exit .../>. Lần này hãy đọc mọi thứ từ XML."
+        ),
+        goal="Đọc XML, hạ từng quái bằng vũ khí ghi trong thẻ, rồi tới cổng.",
+        rows=WEAPON_ROOM,
+        starter='import xml.etree.ElementTree as ET\nroot = ET.fromstring(room_xml)\nprint(len(root.findall("enemy")))\n',
+        hints=["Mỗi thẻ enemy có get(\"x\"), get(\"y\"), get(\"weapon\").", "Toạ độ là chuỗi - đổi sang int."],
+        requires=["import:xml"],
+        extra_globals={
+            "room_xml": (
+                '<room><enemy x="4" y="1" weapon="hammer"/><enemy x="7" y="1" weapon="axe"/>'
+                '<enemy x="5" y="3" weapon="bow"/><exit x="9" y="3"/></room>'
+            ),
+        },
+        weapons=True,
+        kill_all=True,
+    ),
+]
+
+PRACTICE[21] = [
+    Level(
+        id="21-3",
+        title="Máy nhân",
+        story="make_multiplier(k) tạo ra một hàm nhân với k. Mật mã = 14 nhân 3, tính bằng hàm triple tạo từ make_multiplier(3).",
+        goal="Viết closure make_multiplier, tạo hàm triple, dùng nó tính mật mã. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="def make_multiplier(k):\n    pass\n\nhero.move_right(2)\n",
+        hints=["Bên trong tạo hàm nhận n và trả về n nhân k.", "Hàm ngoài trả hàm trong ra (không có ngoặc)."],
+        requires=["closure"],
+        door_code=42,
+    ),
+    Level(
+        id="21-4",
+        title="Bùa báo hiệu",
+        story=(
+            "Viết decorator announce: trước khi chạy hàm, hero nói \"Bắt đầu: \" + tên hàm. "
+            "Tên của hàm f lấy bằng f.__name__."
+        ),
+        goal="Gắn @announce vào hàm hop, dùng hop để vượt cả 3 cái gai và tới cúp.",
+        rows=SPIKE_HOPS,
+        starter=(
+            "def announce(func):\n"
+            "    return func\n"
+            "\n"
+            "@announce\n"
+            "def hop():\n"
+            "    hero.move_up()\n"
+            "    hero.move_right(2)\n"
+            "    hero.move_down()\n"
+            "\n"
+            "hero.move_right(2)\n"
+            "hop()\n"
+        ),
+        hints=["Bên trong announce, tạo hàm bọc: nói trước, rồi gọi func().", "Giữa các lần hop() đi phải 1 ô."],
+        requires=["decorator"],
+        say_contains="Bắt đầu: hop",
+    ),
+    Level(
+        id="21-5",
+        title="Bùa lặp lại",
+        story=(
+            "Decorator có tham số: @repeat(4) làm hàm chạy 4 lần. repeat(times) trả về một decorator - "
+            "tức là 3 tầng hàm lồng nhau."
+        ),
+        goal="Viết repeat(times), gắn @repeat(4) vào hàm stair, gọi stair() MỘT lần để xuống hết cầu thang.",
+        rows=STAIRS,
+        starter=(
+            "def repeat(times):\n"
+            "    pass\n"
+            "\n"
+            "def stair():\n"
+            "    hero.move_right()\n"
+            "    hero.move_down()\n"
+            "\n"
+            "stair()\n"
+        ),
+        hints=[
+            "Tầng ngoài nhận times, tầng giữa nhận func, tầng trong chạy func times lần.",
+            "Mỗi tầng trả về hàm ở tầng ngay bên trong nó.",
+        ],
+        requires=["decorator", "closure"],
+    ),
+]
+
+# ================================================================ GIAI ĐOẠN 5
+PRACTICE[22] = [
+    Level(
+        id="22-3",
+        title="Nhiệt độ trung bình",
+        story="temps = [20, 22, 24, 26, 28]. Mảng NumPy có .mean() tính trung bình cộng.",
+        goal="Mật mã = nhiệt độ trung bình (số nguyên). Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="import numpy as np\ndata = np.array(temps)\nprint(data.max())\n",
+        hints=["Gọi .mean() trên mảng.", "Đổi kết quả sang int."],
+        requires=["import:numpy"],
+        extra_globals={"temps": [20, 22, 24, 26, 28]},
+        door_code=24,
+    ),
+    Level(
+        id="22-4",
+        title="Lọc điểm cao",
+        story=(
+            "scores = [3, 7, 8, 2, 9, 6]. Với NumPy, arr > 5 tạo mảng True/False; "
+            "arr[arr > 5] chỉ giữ các phần tử lớn hơn 5."
+        ),
+        goal="Mật mã = số điểm lớn hơn 5. Mở cửa và tới cúp.",
+        rows=DOOR_DOWN,
+        starter="import numpy as np\narr = np.array(scores)\nprint(arr > 5)\n",
+        hints=["Dùng mảng True/False làm chỉ số để lọc.", "Đếm số phần tử còn lại."],
+        requires=["import:numpy"],
+        extra_globals={"scores": [3, 7, 8, 2, 9, 6]},
+        door_code=4,
+    ),
+    Level(
+        id="22-5",
+        title="Ngày bán chạy",
+        story=(
+            "sales là bảng số hàng bán: mỗi hàng là một cửa hàng, mỗi cột là một ngày. "
+            ".sum(axis=0) cộng theo cột; .argmax() cho VỊ TRÍ của số lớn nhất."
+        ),
+        goal="Mật mã = vị trí (đếm từ 0) của ngày bán được nhiều nhất. Mở cửa và tới cúp.",
+        rows=DOOR_RIGHT,
+        starter="import numpy as np\ntable = np.array(sales)\nprint(table.sum())\n",
+        hints=["Cộng theo cột để có tổng mỗi ngày.", "argmax trả về vị trí - đổi sang int."],
+        requires=["import:numpy", "call:argmax"],
+        extra_globals={"sales": [[3, 5, 2], [4, 1, 6], [2, 7, 3]]},
+        door_code=1,
+    ),
+]
+
+PRACTICE[23] = [
+    Level(
+        id="23-3",
+        title="Bọ tên biến",
+        story="Code này báo NameError. Đọc thông báo lỗi: nó cho biết Python không biết tên nào.",
+        goal="Sửa lỗi để hero tới cúp và nói \"Tới rồi\".",
+        rows=corridor("@..G..E"),
+        starter='steps = 6\nmessage = "Tới rồi"\nhero.move_right(step)\nhero.say(mesage)\n',
+        hints=["So từng chữ của tên biến khi tạo và khi dùng.", "Có hai chỗ gõ sai tên."],
+        requires=["assign"],
+        say_contains="Tới rồi",
+    ),
+    Level(
+        id="23-4",
+        title="Bọ kiểu dữ liệu",
+        story="Code này báo TypeError: dùng sai kiểu dữ liệu. Có 2 chỗ sai kiểu.",
+        goal="Sửa lỗi để hero nói \"Có 1 ngọc\" và tới cúp.",
+        rows=corridor("@.G.E"),
+        starter='gems = len(hero.find_gems())\nhero.say("Có " + gems + " ngọc")\nhero.move_right("4")\n',
+        hints=["Nối chuỗi với số phải đổi số sang chuỗi.", "Số bước phải là số, không phải chuỗi."],
+        requires=["call:str"],
+        say_contains="Có 1 ngọc",
+    ),
+    Level(
+        id="23-5",
+        title="Bọ lặp vô hạn",
+        story="Chương trình này không bao giờ dừng: điều kiện của while luôn đúng. Hãy tìm vì sao.",
+        goal="Sửa vòng lặp để hero đi đúng 5 bước, nhặt hết ngọc và tới cúp.",
+        rows=corridor("@GGGGE"),
+        starter="count = 0\nwhile count < 5:\n    hero.move_right()\n",
+        hints=["Giá trị của count có bao giờ thay đổi không?", "Mỗi vòng lặp cần tăng count lên."],
+        requires=["while"],
+    ),
+]
 
 
 # ======================================================================
@@ -2263,6 +3498,11 @@ WORLDS: list[WorldInfo] = [
     ]),
 ]
 
+# Bài luyện tập thêm (levels_practice.py) được nối vào cuối mỗi WorldInfo;
+# mã bài cũ giữ nguyên nên tiến độ cũ của học sinh không bị ảnh hưởng.
+for _world in WORLDS:
+    _world.levels.extend(PRACTICE.get(_world.number, []))
+
 
 def all_levels() -> list[Level]:
     return [level for world in WORLDS for level in world.levels]
@@ -3392,6 +4632,1319 @@ THEORY.update({
         mistakes=["Đoán mò rồi sửa lung tung - hãy in giá trị ra để biết chắc."],
     ),
 })
+
+# Lý thuyết của các bài luyện tập thêm (tự đăng ký vào THEORY khi được import).
+
+
+# ======================================================================
+# theory_practice.py
+# ======================================================================
+
+PRACTICE_THEORY: dict[str, Theory] = {}
+
+# ================================================================ GIAI ĐOẠN 1
+PRACTICE_THEORY.update({
+    "1-4": Theory(
+        concept=[
+            "Chương trình là một DÃY lệnh chạy lần lượt. Đổi thứ tự lệnh là đổi đường đi.",
+            "`hero.move_right()` không ghi số thì đi đúng 1 bước.",
+            "Mẹo: nhìn bản đồ, đọc đường đi thành từng bước nhỏ rồi viết từng lệnh tương ứng.",
+        ],
+        starter_notes=[
+            ("hero.move_right()", "Bước 1: sang phải 1 ô."),
+            ("hero.move_down()", "Bước 2: xuống 1 ô."),
+            ("# viết tiếp", "Ghi chú: bạn viết tiếp các bước còn lại."),
+        ],
+        example=[
+            ("hero.move_down()", "Xuống 1."),
+            ("hero.move_left()", "Trái 1."),
+            ("hero.move_down()", "Xuống 1."),
+            ("hero.move_left()", "Trái 1 - đường zigzag theo hướng ngược lại."),
+        ],
+        mistakes=["Viết thiếu hoặc thừa một lệnh làm hero đụng tường và dừng ở giữa đường."],
+    ),
+    "1-5": Theory(
+        concept=[
+            "Không phải lúc nào cũng đi thẳng tới đích được - đôi khi phải đi vòng.",
+            "Có 4 hướng: lên (up), xuống (down), trái (left), phải (right).",
+            "Lệnh `hero.say(...)` có thể đặt ở bất kỳ đâu - ở đây là sau khi tới cúp.",
+        ],
+        starter_notes=[("hero.move_down(2)", "Đoạn 1: đi xuống 2 ô.")],
+        example=[
+            ("hero.move_right(3)", "Sang phải 3."),
+            ("hero.move_down(2)", "Xuống 2."),
+            ("hero.move_left(3)", "Quay về trái 3 - một đường vòng chữ U úp."),
+            ('hero.say("Xong")', "Nói khi đã tới nơi."),
+        ],
+        mistakes=["Nhầm move_up và move_down: trên bản đồ, đi lên là y giảm."],
+    ),
+    "2-3": Theory(
+        concept=[
+            "Giá trị trong biến có thể THAY ĐỔI. `steps = steps - 1`: lấy giá trị cũ trừ 1 rồi cất lại vào chính steps.",
+            "Viết tắt: `steps -= 1` giống `steps = steps - 1`; `steps += 2` giống `steps = steps + 2`.",
+            "Dùng lại một biến giúp code dễ sửa: đổi một chỗ là mọi nơi dùng biến đều đổi theo.",
+        ],
+        starter_notes=[
+            ("steps = 3", "Biến steps bắt đầu bằng 3."),
+            ("hero.move_right(steps)", "Đi phải 3 ô."),
+            ("# đổi steps rồi đi xuống", "Bạn thay đổi steps rồi dùng nó để đi xuống."),
+        ],
+        example=[
+            ("lives = 3", "Bắt đầu 3 mạng."),
+            ("lives = lives - 1", "Mất 1 mạng: còn 2."),
+            ("lives += 5", "Nhặt thêm 5: còn 7."),
+            ("print(lives)", "7."),
+        ],
+        mistakes=["Viết `steps - 1` một mình (không gán) thì steps KHÔNG thay đổi."],
+    ),
+    "2-4": Theory(
+        concept=[
+            "Mỗi giá trị có KIỂU: `\"Mai\"` là chuỗi (str), `12` là số nguyên (int).",
+            "Dấu `+` nối được chuỗi với chuỗi, cộng được số với số, nhưng KHÔNG trộn chuỗi với số.",
+            "`str(12)` đổi số 12 thành chuỗi `\"12\"` để nối được.",
+        ],
+        starter_notes=[
+            ('# name = "Mai", age = 12', "Hai biến có sẵn: một chuỗi, một số."),
+            ("hero.say(name)", "Mới nói tên, còn thiếu tuổi."),
+            ("hero.move_right(6)", "Đi tới cúp."),
+        ],
+        example=[
+            ('pet = "Mướp"', "Chuỗi."),
+            ("weight = 4", "Số."),
+            ('print(pet + " nặng " + str(weight) + " kg")', "Mướp nặng 4 kg."),
+        ],
+        mistakes=["Quên dấu cách: `name + str(age)` cho ra \"Mai12\"."],
+    ),
+    "2-5": Theory(
+        concept=[
+            "Phép chia `/` luôn cho số thực: `17 / 5 = 3.4`.",
+            "Phép chia lấy phần nguyên `//`: `17 // 5 = 3`. Phép chia lấy dư `%`: `17 % 5 = 2`.",
+            "Ứng dụng: chia đồ vật, kiểm tra chẵn lẻ (`n % 2 == 0` là số chẵn).",
+        ],
+        starter_notes=[
+            ("# gems = 17, friends = 5", "Biến có sẵn."),
+            ("each = gems / friends", "Phép / cho 3.4 - không phải số kẹo nguyên."),
+            ("hero.say(each)", "Hero nói 3.4."),
+            ("hero.move_right(5)", "Đi tới cúp."),
+        ],
+        example=[
+            ("minutes = 135", "135 phút."),
+            ("hours = minutes // 60", "2 giờ."),
+            ("rest = minutes % 60", "15 phút."),
+            ('print(str(hours) + " giờ " + str(rest) + " phút")', "2 giờ 15 phút."),
+        ],
+        mistakes=["Nhầm `%` (chia lấy dư) với phần trăm."],
+    ),
+    "3-3": Theory(
+        concept=[
+            "Phép so sánh: `>` lớn hơn, `<` nhỏ hơn, `>=` lớn hơn hoặc bằng, `<=` nhỏ hơn hoặc bằng, `==` bằng, `!=` khác.",
+            "Kết quả so sánh là `True` hoặc `False` - quyết định nhánh nào của if/else được chạy.",
+        ],
+        starter_notes=[
+            ("# coins = 7, vé vào cổng giá 5", "Dữ kiện: có 7 xu, vé 5 xu."),
+            ("if coins >= 10:", "Đang so với 10 - sai giá vé."),
+            ('    hero.say("Đủ tiền")', "Nhánh đủ tiền."),
+            ("else:", "Ngược lại..."),
+            ('    hero.say("Thiếu tiền")', "...nhánh thiếu tiền."),
+            ("hero.move_right(5)", "Đi tới cúp."),
+        ],
+        example=[
+            ("age = 12", "12 tuổi."),
+            ("if age >= 13:", "Từ 13 tuổi trở lên?"),
+            ('    print("Vé người lớn")', ""),
+            ("else:", ""),
+            ('    print("Vé trẻ em")', "In: Vé trẻ em."),
+        ],
+        mistakes=["`>` và `>=` khác nhau khi hai số bằng nhau."],
+    ),
+    "3-4": Theory(
+        concept=[
+            "`elif` (else if) kiểm tra thêm điều kiện khi điều kiện trước sai.",
+            "Python xét lần lượt từ trên xuống, chạy nhánh ĐẦU TIÊN đúng rồi bỏ qua các nhánh còn lại.",
+        ],
+        starter_notes=[
+            ("hero.move_right(2)", "Đi tới ngã ba."),
+            ('if hero.look("up") == "spike":', "Chỉ kiểm tra phía trên - lần này gai lại ở dưới."),
+            ("    hero.move_down()", "Đi xuống nếu trên có gai."),
+        ],
+        example=[
+            ("score = 7", "Điểm 7."),
+            ("if score >= 9:", ""),
+            ('    print("Giỏi")', ""),
+            ("elif score >= 6.5:", "Không giỏi thì xét tiếp."),
+            ('    print("Khá")', "In: Khá."),
+            ("else:", ""),
+            ('    print("Cố lên")', ""),
+        ],
+        mistakes=["Viết hai câu `if` riêng thay vì `if/elif` - cả hai có thể cùng chạy."],
+    ),
+    "3-5": Theory(
+        concept=[
+            "`and`: đúng khi CẢ HAI điều kiện đúng. `or`: đúng khi ÍT NHẤT MỘT điều kiện đúng. `not`: đảo ngược.",
+            "`hero.hp` cho biết số máu hiện tại của hero (tối đa 3).",
+        ],
+        starter_notes=[
+            ("hero.move_right(2)", "Đi tới gần quái."),
+            ("if hero.hp > 1:", "Mới kiểm tra máu, chưa kiểm tra có quái hay không."),
+            ("    pass", "Chưa làm gì."),
+        ],
+        example=[
+            ("rain = False", "Không mưa."),
+            ("homework_done = True", "Đã làm bài."),
+            ("if homework_done and not rain:", "Cả hai cùng đúng."),
+            ('    print("Đi đá bóng!")', "In ra."),
+        ],
+        mistakes=["Viết `if hero.look(\"right\") == \"enemy\" and > 1` - mỗi vế phải là một so sánh đầy đủ."],
+    ),
+    "4-4": Theory(
+        concept=[
+            "`range(a, b)` sinh các số từ a tới b-1: `range(1, 4)` cho 1, 2, 3.",
+            "Biến vòng lặp (i) có thể dùng trong thân vòng lặp, mỗi vòng một giá trị khác.",
+        ],
+        starter_notes=[
+            ("for i in range(3):", "Lặp 3 lần với i = 0, 1, 2."),
+            ("    print(i)", "In giá trị i để xem."),
+        ],
+        example=[
+            ("for n in range(2, 5):", "n = 2, 3, 4."),
+            ('    print("*" * n)', "In 2, 3, 4 dấu sao - tam giác lớn dần."),
+        ],
+        mistakes=["range(1, 3) chỉ có 1 và 2 - không có 3."],
+    ),
+    "4-5": Theory(
+        concept=[
+            "Vòng lặp LỒNG NHAU: vòng trong chạy trọn vẹn cho MỖI lần lặp của vòng ngoài.",
+            "Thụt lề quyết định lệnh thuộc vòng nào: thụt sâu hơn là thuộc vòng trong.",
+            "Vòng trong có thể phụ thuộc biến của vòng ngoài: `for j in range(i):`.",
+        ],
+        starter_notes=[
+            ("for i in range(1, 5):", "i = 1, 2, 3, 4 - độ dài mỗi bậc."),
+            ("    hero.move_right(i)", "Đi i bước, nhưng chưa có bước đi xuống."),
+        ],
+        example=[
+            ("for row in range(1, 4):", "3 hàng."),
+            ("    line = \"\"", "Bắt đầu một hàng."),
+            ("    for col in range(row):", "Hàng thứ row có row ô."),
+            ('        line = line + "#"', ""),
+            ("    print(line)", "In #, ##, ###."),
+        ],
+        mistakes=["Đặt lệnh của vòng ngoài vào vòng trong (thụt lề sai) làm nó chạy quá nhiều lần."],
+    ),
+    "5-3": Theory(
+        concept=[
+            "`int(\"7\")` được, nhưng `int(\"7.0\")` báo ValueError vì có dấu chấm.",
+            "Cách làm: `float(\"7.0\")` → 7.0, rồi `int(7.0)` → 7. Có thể viết gọn `int(float(...))`.",
+            "`int()` của số thực sẽ BỎ phần lẻ: `int(3.9)` là 3.",
+        ],
+        starter_notes=[
+            ('# distance = "7.0"', "Chuỗi có dấu chấm thập phân."),
+            ("hero.move_right(int(distance))", "int(\"7.0\") sẽ lỗi."),
+        ],
+        example=[
+            ('height = "1.55"', "Chiều cao dạng chuỗi."),
+            ("print(float(height) * 100)", "155.0."),
+            ("print(int(float(height) * 100))", "155."),
+        ],
+        mistakes=["Dùng round thay int có thể làm tròn lên khác ý muốn."],
+    ),
+    "5-4": Theory(
+        concept=[
+            "Mật mã có thể là chuỗi chứ không chỉ là số.",
+            "Ghép chữ và số: đổi số sang chuỗi bằng `str()` rồi nối bằng `+`.",
+        ],
+        starter_notes=[
+            ("# room = 7", "Số phòng là số."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+            ('hero.enter_code("Phòng" + room)', "Chuỗi + số → TypeError; cũng thiếu dấu cách."),
+        ],
+        example=[
+            ("level = 3", "Màn số 3."),
+            ('label = "Màn " + str(level)', "\"Màn 3\"."),
+            ("print(label)", "Màn 3."),
+        ],
+        mistakes=["`str(\"Phòng \" + room)` vẫn lỗi vì phép + chạy trước khi đổi kiểu."],
+    ),
+    "5-5": Theory(
+        concept=[
+            "`bool(x)` đổi sang True/False. Số 0, chuỗi rỗng `\"\"`, list rỗng `[]` là False; còn lại là True.",
+            "Bẫy: `bool(\"0\")` là True vì chuỗi \"0\" KHÔNG rỗng. Phải đổi sang số trước: `bool(int(\"0\"))` là False.",
+        ],
+        starter_notes=[
+            ('# switch = "0"', "Công tắc ghi bằng chuỗi."),
+            ("print(bool(switch))  # thử xem", "In ra True - bất ngờ chưa?"),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1, đứng trên cửa."),
+        ],
+        example=[
+            ("print(bool(5), bool(0))", "True False."),
+            ('print(bool("hi"), bool(""))', "True False."),
+            ("print(bool([]))", "False - list rỗng."),
+        ],
+        mistakes=["Tưởng `bool(\"False\")` là False - thực ra là True."],
+    ),
+    "6-4": Theory(
+        concept=[
+            "THAM SỐ là biến của hàm, nhận giá trị khi gọi: `step(2)` thì n = 2, `step(3)` thì n = 3.",
+            "Một hàm có tham số dùng được cho nhiều trường hợp khác nhau.",
+        ],
+        starter_notes=[
+            ("def step(n):", "Hàm step nhận tham số n."),
+            ("    hero.move_right(n)", "Đi phải n ô - còn thiếu phần đi xuống."),
+            ("step(2)", "Gọi hàm với n = 2."),
+        ],
+        example=[
+            ("def greet(name, times):", "Hai tham số."),
+            ("    for i in range(times):", ""),
+            ('        print("Chào", name)', ""),
+            ('greet("An", 2)', "In 2 lần: Chào An."),
+        ],
+        mistakes=["Định nghĩa hàm có tham số nhưng gọi mà không truyền giá trị → TypeError."],
+    ),
+    "6-5": Theory(
+        concept=[
+            "`max(list)` cho phần tử lớn nhất, `min(list)` cho phần tử nhỏ nhất.",
+            "Có thể dùng thẳng kết quả trong phép tính: `max(a) - min(a)`.",
+        ],
+        starter_notes=[
+            ("# scores = [7, 9, 4, 10, 6]", "List điểm có sẵn."),
+            ("print(sum(scores))", "In tổng điểm."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ("temps = [28, 31, 25, 30]", "Nhiệt độ các ngày."),
+            ("print(max(temps), min(temps))", "31 25."),
+            ("print(sum(temps) / len(temps))", "28.5 - trung bình."),
+        ],
+        mistakes=["`max` của list rỗng sẽ báo lỗi."],
+    ),
+    "7-3": Theory(
+        concept=[
+            "Cắt chuỗi có 3 phần: `chuoi[dau:cuoi:buoc]`.",
+            "Bước 2 lấy cách một ký tự; bước -1 đi ngược từ cuối về đầu, tức là ĐẢO NGƯỢC chuỗi.",
+        ],
+        starter_notes=[
+            ('# scroll = "olleh"', "Mật mã bị viết ngược."),
+            ("print(scroll[0])", "In chữ o."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ('word = "abcdef"', ""),
+            ("print(word[::2])", "ace - lấy cách một."),
+            ("print(word[::-1])", "fedcba - đảo ngược."),
+            ('print("level"[::-1] == "level")', "True - từ đối xứng."),
+        ],
+        mistakes=["Viết `[:-1]` (bỏ ký tự cuối) thay vì `[::-1]` (đảo ngược)."],
+    ),
+    "7-4": Theory(
+        concept=[
+            "`.split(dau_tach)` cắt chuỗi thành list: `\"a,b\".split(\",\")` → `[\"a\", \"b\"]`.",
+            "Các phần sau khi cắt vẫn là CHUỖI - muốn tính toán phải `int(...)`.",
+            "Ngược lại, `\",\".join(list)` nối list chuỗi thành một chuỗi.",
+        ],
+        starter_notes=[
+            ('# route = "2,3,1"', "Chỉ đường dạng chuỗi."),
+            ("parts = route", "Chưa cắt chuỗi."),
+            ("print(parts)", "In nguyên chuỗi."),
+        ],
+        example=[
+            ('date = "21/11/2026"', ""),
+            ('day, month, year = date.split("/")', "Cắt và mở gói 3 phần."),
+            ("print(int(year) - 2000)", "26."),
+            ('print("-".join(["a", "b", "c"]))', "a-b-c."),
+        ],
+        mistakes=["Quên `int()` → move_right(\"2\") báo lỗi kiểu."],
+    ),
+    "7-5": Theory(
+        concept=[
+            "`.count(x)` đếm số lần x xuất hiện trong chuỗi (dùng được cả với list).",
+            "`len(chuoi)` đếm tất cả ký tự, kể cả dấu cách.",
+            "Chuỗi còn có `.find(x)` (vị trí đầu tiên của x) và `.replace(a, b)`.",
+        ],
+        starter_notes=[
+            ('# message = "banana bandana"', "Chuỗi có sẵn."),
+            ("print(len(message))", "In 14 - tổng số ký tự."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ('text = "hello world"', ""),
+            ('print(text.count("o"))', "2."),
+            ('print(text.find("world"))', "6."),
+            ('print(text.replace("world", "OneSpace"))', "hello OneSpace."),
+        ],
+        mistakes=["`count` phân biệt hoa thường: \"A\" khác \"a\"."],
+    ),
+    "8-3": Theory(
+        concept=[
+            "Lấy phần tử list theo VỊ TRÍ: `ds[0]` là phần tử đầu, `ds[1]` là phần tử thứ hai...",
+            "`ds[-1]` là phần tử cuối. `len(ds)` cho số phần tử.",
+        ],
+        starter_notes=[
+            ("# steps = [3, 2, 4]", "List có sẵn."),
+            ("print(steps[0])", "In 3 - phần tử đầu tiên."),
+            ("print(len(steps))", "In 3 - list có 3 phần tử."),
+        ],
+        example=[
+            ('colors = ["đỏ", "xanh", "vàng"]', ""),
+            ("print(colors[1])", "xanh."),
+            ("print(colors[-1])", "vàng."),
+            ('colors[0] = "tím"', "Sửa phần tử đầu."),
+        ],
+        mistakes=["`steps[3]` ngoài phạm vi khi list chỉ có 3 phần tử (vị trí 0, 1, 2)."],
+    ),
+    "8-4": Theory(
+        concept=[
+            "Bắt đầu với list rỗng `[]`, mỗi vòng lặp dùng `.append(x)` thêm một phần tử vào CUỐI list.",
+            "Đây là cách thu thập kết quả hay dùng nhất.",
+        ],
+        starter_notes=[
+            ("xs = []", "List rỗng để ghi chép."),
+            ("for gem in hero.find_gems():", "Duyệt từng viên ngọc."),
+            ("    pass", "Chưa ghi gì vào xs."),
+            ("hero.say(xs)", "Nói ra list - hiện đang rỗng."),
+        ],
+        example=[
+            ("evens = []", ""),
+            ("for n in range(1, 7):", ""),
+            ("    if n % 2 == 0:", "Số chẵn?"),
+            ("        evens.append(n)", "Thêm vào cuối."),
+            ("print(evens)", "[2, 4, 6]."),
+        ],
+        mistakes=["`xs = xs.append(x)` làm xs thành None - append sửa list tại chỗ, không trả về gì."],
+    ),
+    "8-5": Theory(
+        concept=[
+            "List có thể chứa tuple: `[(3, 1), (3, 3)]` - mỗi phần tử là một toạ độ.",
+            "Mở gói tuple ngay trong vòng for: `for x, y in stops:`.",
+        ],
+        starter_notes=[
+            ("# stops = [(3, 1), (3, 3), (5, 3), (6, 3)]", "List các điểm dừng."),
+            ("first = stops[0]", "Lấy tuple đầu tiên (3, 1)."),
+            ("print(first[0], first[1])", "In 3 1."),
+        ],
+        example=[
+            ('friends = [("An", 12), ("Bình", 13)]', "List các tuple (tên, tuổi)."),
+            ("for name, age in friends:", "Mở gói ngay."),
+            ('    print(name, "năm sau", age + 1, "tuổi")', ""),
+        ],
+        mistakes=["`for x, y in stops[0]:` - duyệt trong một tuple, không phải cả list."],
+    ),
+    "9-3": Theory(
+        concept=[
+            "Dict dùng như BẢNG TRA: khoá là tên món, giá trị là giá.",
+            "Tra nhiều lần trong vòng lặp và cộng dồn kết quả vào một biến.",
+        ],
+        starter_notes=[
+            ("# prices, basket có sẵn", "Bảng giá (dict) và giỏ hàng (list)."),
+            ('print(prices["táo"])', "In 5 - giá một quả táo."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ('points = {"vàng": 3, "bạc": 2, "đồng": 1}', "Điểm huy chương."),
+            ('medals = ["vàng", "đồng", "vàng"]', ""),
+            ("score = 0", ""),
+            ("for m in medals:", ""),
+            ("    score += points[m]", "Tra rồi cộng."),
+            ("print(score)", "7."),
+        ],
+        mistakes=["Tra khoá không có (ví dụ \"nho\") → KeyError."],
+    ),
+    "9-4": Theory(
+        concept=[
+            "Dict làm SỔ ĐẾM: khoá là thứ cần đếm, giá trị là số lần.",
+            "`d.get(k, 0)` trả về `d[k]` nếu có, nếu chưa có thì trả về 0 - không lỗi.",
+            "Mẫu hay dùng: `d[k] = d.get(k, 0) + 1`.",
+        ],
+        starter_notes=[
+            ("counts = {}", "Sổ đếm rỗng."),
+            ("print(counts)", "In {}."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ('letters = "hello"', ""),
+            ("tally = {}", ""),
+            ("for ch in letters:", ""),
+            ("    tally[ch] = tally.get(ch, 0) + 1", ""),
+            ("print(tally)", "{'h': 1, 'e': 1, 'l': 2, 'o': 1}."),
+        ],
+        mistakes=["`counts[w] += 1` khi w chưa có trong dict → KeyError."],
+    ),
+    "9-5": Theory(
+        concept=[
+            "Đổi list sang set để LOẠI phần tử trùng: `set([1, 1, 2])` → `{1, 2}`.",
+            "`len(set(ds))` = số giá trị khác nhau trong ds.",
+        ],
+        starter_notes=[
+            ("# visitors có sẵn", "List tên khách, có tên trùng."),
+            ("print(len(visitors))", "In 6 - đếm cả lượt trùng."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ("rolls = [3, 6, 3, 1, 6, 6]", "Kết quả gieo xúc xắc."),
+            ("print(set(rolls))", "{1, 3, 6}."),
+            ("print(len(set(rolls)))", "3 mặt khác nhau."),
+        ],
+        mistakes=["set không giữ thứ tự - không dùng `set(...)[0]` được."],
+    ),
+    "10-3": Theory(
+        concept=[
+            "List comprehension: `[bieu_thuc for x in ds]` tạo list mới, mỗi phần tử là bieu_thuc tính từ x.",
+            "Gọn hơn hẳn cách viết dài với list rỗng + for + append.",
+        ],
+        starter_notes=[
+            ("squares = []", "List rỗng - bạn thay bằng comprehension."),
+            ("print(numbers)", "In [1, 2, 3, 4]."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ("prices = [10, 20, 30]", ""),
+            ("sale = [p * 0.9 for p in prices]", "Giảm 10%."),
+            ("print(sale)", "[9.0, 18.0, 27.0]."),
+            ('print([w.upper() for w in ["a", "b"]])', "['A', 'B']."),
+        ],
+        mistakes=["Viết `for` trước biểu thức: `[for n in ds n*n]` là sai cú pháp."],
+    ),
+    "10-4": Theory(
+        concept=[
+            "Comprehension có thể có 2 vòng for, viết theo thứ tự giống for lồng nhau: `[n for row in t for n in row]`.",
+            "Kết quả là list \"trải phẳng\" - mọi số nằm trên một hàng.",
+        ],
+        starter_notes=[
+            ("print(table[0])", "In [1, 2] - hàng đầu."),
+            ("print(table[2][1])", "In 6 - hàng 2, cột 1."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ('words = [["a", "b"], ["c"]]', ""),
+            ("flat = [w for group in words for w in group]", "Trải phẳng."),
+            ("print(flat)", "['a', 'b', 'c']."),
+        ],
+        mistakes=["Đảo thứ tự hai vòng for: `[n for n in row for row in t]` báo lỗi vì row chưa có."],
+    ),
+    "10-5": Theory(
+        concept=[
+            "`enumerate(ds)` cho từng cặp (vị trí, phần tử): rất hợp để biết TOẠ ĐỘ trong bản đồ.",
+            "Comprehension 2 vòng có thêm `if` để chỉ giữ các ô cần tìm.",
+            "Kết quả là list các tuple (x, y) - dùng `move_to` để đi tới.",
+        ],
+        starter_notes=[
+            ("grid = hero.scan()", "Bản đồ: grid[y][x]."),
+            ("print(grid[1][7])", "In ô ở hàng 1, cột 7 - là \"gem\"."),
+        ],
+        example=[
+            ('seats = [["", "An"], ["Bình", ""]]', "Sơ đồ chỗ ngồi."),
+            ('empty = [(r, c) for r, row in enumerate(seats) for c, name in enumerate(row) if name == ""]', ""),
+            ("print(empty)", "[(0, 0), (1, 1)] - các ghế trống."),
+        ],
+        mistakes=["Nhầm thứ tự (x, y) và (y, x): grid[y][x] nhưng move_to(x, y)."],
+    ),
+})
+
+
+# ================================================================ GIAI ĐOẠN 2
+PRACTICE_THEORY.update({
+    "11-2": Theory(
+        concept=[
+            "Hiệu tập hợp `a - b`: phần tử có trong a nhưng không có trong b. Viết bằng hàm: `a.difference(b)`.",
+            "Thứ tự quan trọng: `a - b` khác `b - a`.",
+        ],
+        starter_notes=[
+            ("# invited, came có sẵn", "Hai list tên."),
+            ("print(set(invited))", "In tập các bạn được mời."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ('all_books = {"Toán", "Văn", "Anh", "Sử"}', "Sách cần mang."),
+            ('packed = {"Toán", "Anh"}', "Đã cho vào cặp."),
+            ("print(all_books - packed)", "{'Văn', 'Sử'} - còn thiếu."),
+        ],
+        mistakes=["Viết `came - invited` sẽ ra tập rỗng - đảo ngược thứ tự."],
+    ),
+    "11-3": Theory(
+        concept=[
+            "`x in tap_hop` trả về True nếu x có trong tập. Dùng được với list, chuỗi, dict, set.",
+            "Với set, `in` kiểm tra gần như tức thì dù tập rất lớn - nhanh hơn list nhiều.",
+            "`not in` là ngược lại.",
+        ],
+        starter_notes=[
+            ("# tickets (list), valid (set) có sẵn", "Vé khách đưa và tập mã hợp lệ."),
+            ('print("A12" == "A12")', "So sánh bằng: True."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ('vowels = {"a", "e", "i", "o", "u"}', ""),
+            ("count = 0", ""),
+            ('for ch in "education":', ""),
+            ("    if ch in vowels:", "Là nguyên âm?"),
+            ("        count += 1", ""),
+            ("print(count)", "5."),
+        ],
+        mistakes=["`if ticket == valid` so sánh với cả tập - luôn sai."],
+    ),
+    "11-4": Theory(
+        concept=[
+            "Hiệu đối xứng `a ^ b`: phần tử chỉ thuộc MỘT trong hai tập. Hàm tương ứng: `a.symmetric_difference(b)`.",
+            "Bằng `(a | b) - (a & b)`: hợp trừ đi phần chung.",
+        ],
+        starter_notes=[
+            ("a = set(stickers_an)", "Sticker của An."),
+            ("b = set(stickers_binh)", "Sticker của Bình."),
+            ("print(a & b)", "In phần cả hai cùng có: {3, 4}."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ('lop_a = {"bơi", "cờ"}', ""),
+            ('lop_b = {"cờ", "vẽ"}', ""),
+            ("print(lop_a ^ lop_b)", "{'bơi', 'vẽ'}."),
+        ],
+        mistakes=["Nhầm `^` là luỹ thừa: trong Python luỹ thừa là `**`."],
+    ),
+    "11-5": Theory(
+        concept=[
+            "Tập con: `a <= b` (hay `a.issubset(b)`) đúng khi MỌI phần tử của a đều có trong b.",
+            "Tập cha: `a >= b` đúng khi a chứa mọi phần tử của b.",
+        ],
+        starter_notes=[
+            ("# required (set), backpack (list) có sẵn", "Đồ cần thiết và đồ trong ba lô."),
+            ("if len(backpack) > 5:", "So số lượng - không đúng ý."),
+            ('    hero.say("Đủ đồ")', ""),
+            ("else:", ""),
+            ('    hero.say("Thiếu đồ")', ""),
+            ("hero.move_right(6)", "Đi tới cúp."),
+        ],
+        example=[
+            ('needed = {"bút", "thước"}', ""),
+            ('pencil_case = {"bút", "tẩy", "thước"}', ""),
+            ("print(needed <= pencil_case)", "True - đủ đồ."),
+            ('print({"compa"} <= pencil_case)', "False."),
+        ],
+        mistakes=["So sánh list với set bằng `<=` sẽ lỗi - đổi cả hai sang set."],
+    ),
+    "12-3": Theory(
+        concept=[
+            "`math.ceil(x)` làm tròn LÊN số nguyên gần nhất: `math.ceil(2.1)` = 3.",
+            "`math.floor(x)` làm tròn XUỐNG; `round(x)` làm tròn tới số gần nhất.",
+            "Bài toán \"cần bao nhiêu xe / hộp / túi\" thường phải làm tròn lên.",
+        ],
+        starter_notes=[
+            ("import math", "Nạp thư viện."),
+            ("# students = 45, seats = 16", "Biến có sẵn."),
+            ("print(students / seats)", "In 2.8125."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ("import math", ""),
+            ("pages = 50", "50 trang."),
+            ("per_day = 12", "Đọc 12 trang mỗi ngày."),
+            ("print(math.ceil(pages / per_day))", "5 ngày mới đọc xong."),
+        ],
+        mistakes=["Dùng `//` (làm tròn xuống) sẽ thiếu một xe."],
+    ),
+    "12-4": Theory(
+        concept=[
+            "`math.pi` ≈ 3.14159. Diện tích hình tròn = π × r², chu vi = 2 × π × r.",
+            "`round(x)` làm tròn về số nguyên gần nhất; `round(x, 2)` giữ 2 chữ số thập phân.",
+        ],
+        starter_notes=[
+            ("import math", "Nạp thư viện."),
+            ("# r = 5", "Bán kính có sẵn."),
+            ("print(r ** 2)", "In 25."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ("import math", ""),
+            ("radius = 3", ""),
+            ("perimeter = 2 * math.pi * radius", "Chu vi."),
+            ("print(round(perimeter, 1))", "18.8."),
+        ],
+        mistakes=["Viết `math.pi * r * 2` là chu vi chứ không phải diện tích."],
+    ),
+    "12-5": Theory(
+        concept=[
+            "Số cách CHỌN k người trong n người (không tính thứ tự) là tổ hợp: `math.comb(n, k)`.",
+            "Giai thừa `math.factorial(n)` = 1 × 2 × ... × n - số cách xếp n người thành hàng.",
+        ],
+        starter_notes=[
+            ("import math", "Nạp thư viện."),
+            ("print(math.factorial(3))", "In 6 = 1 × 2 × 3."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ("import math", ""),
+            ("print(math.comb(5, 3))", "10 cách chọn 3 trong 5."),
+            ("print(math.factorial(4))", "24 cách xếp 4 bạn."),
+        ],
+        mistakes=["Đảo tham số `math.comb(2, 6)` ra 0."],
+    ),
+    "13-3": Theory(
+        concept=[
+            "`permutations` sinh kết quả \"lười\" - phải bọc `list(...)` mới đếm được bằng `len`.",
+            "Với chuỗi, mỗi ký tự là một phần tử: `permutations(\"AB\")` → ('A','B'), ('B','A').",
+        ],
+        starter_notes=[
+            ("from itertools import permutations", "Nạp hàm."),
+            ('print(list(permutations("AB")))', "In 2 cách xếp."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ("from itertools import permutations", ""),
+            ('podium = list(permutations(["An", "Bình", "Chi"], 2))', "Chọn nhất và nhì."),
+            ("print(len(podium))", "6."),
+        ],
+        mistakes=["`len(permutations(...))` báo lỗi - cần list(...) trước."],
+    ),
+    "13-4": Theory(
+        concept=[
+            "`product(a, b)` ghép mọi phần tử của a với mọi phần tử của b - như bảng phối đồ.",
+            "Số kết quả = len(a) × len(b). Có thể ghép nhiều list: `product(a, b, c)`.",
+        ],
+        starter_notes=[
+            ("from itertools import product", "Nạp hàm."),
+            ('for combo in product([1, 2], ["x"]):', "Ghép 1-x, 2-x."),
+            ("    print(combo)", "In từng cặp."),
+        ],
+        example=[
+            ("from itertools import product", ""),
+            ('drinks = ["trà", "sữa"]', ""),
+            ('sizes = ["S", "M", "L"]', ""),
+            ("print(len(list(product(drinks, sizes))))", "6 lựa chọn."),
+        ],
+        mistakes=["Nhầm với zip: zip ghép theo cặp vị trí, product ghép mọi khả năng."],
+    ),
+    "13-5": Theory(
+        concept=[
+            "Duyệt `combinations(ds, 2)` rồi dùng `if` để chỉ đếm các cặp thoả điều kiện.",
+            "Cách này gọi là \"vét cạn\": thử hết khả năng - phù hợp khi dữ liệu nhỏ.",
+        ],
+        starter_notes=[
+            ("from itertools import combinations", "Nạp hàm."),
+            ("print(list(combinations([1, 2, 5], 2)))", "In 3 cặp."),
+        ],
+        example=[
+            ("from itertools import combinations", ""),
+            ("weights = [3, 4, 6]", "Cân nặng 3 kiện hàng."),
+            ("light = [p for p in combinations(weights, 2) if sum(p) <= 8]", "Cặp nhẹ."),
+            ("print(light)", "[(3, 4)]."),
+        ],
+        mistakes=["Quên rằng combinations không lấy một phần tử hai lần (không có cặp (5, 5))."],
+    ),
+    "14-3": Theory(
+        concept=[
+            "`defaultdict(list)`: dict tự tạo list rỗng khi gặp khoá mới, nên `groups[k].append(x)` không bao giờ KeyError.",
+            "`defaultdict(int)` tự tạo số 0 - tiện để đếm.",
+        ],
+        starter_notes=[
+            ("from collections import defaultdict", "Nạp defaultdict."),
+            ("groups = defaultdict(list)", "Dict gom nhóm."),
+            ('print(groups["rau"])', "In [] - khoá mới tự có list rỗng."),
+        ],
+        example=[
+            ("from collections import defaultdict", ""),
+            ('pets = [("mèo", "Mướp"), ("chó", "Vàng"), ("mèo", "Mun")]', ""),
+            ("by_kind = defaultdict(list)", ""),
+            ("for kind, name in pets:", ""),
+            ("    by_kind[kind].append(name)", ""),
+            ('print(by_kind["mèo"])', "['Mướp', 'Mun']."),
+        ],
+        mistakes=["Với dict thường, `d[k].append(x)` khi k chưa có sẽ KeyError."],
+    ),
+    "14-4": Theory(
+        concept=[
+            "`Counter(ds).most_common(1)` → `[(giá_trị, số_lần)]`.",
+            "Lấy tên: `[0]` lấy tuple, `[0][0]` lấy phần tử đầu của tuple.",
+        ],
+        starter_notes=[
+            ("from collections import Counter", "Nạp Counter."),
+            ("print(len(votes))", "In tổng số phiếu: 6."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ("from collections import Counter", ""),
+            ('fruits = ["táo", "cam", "táo"]', ""),
+            ("top = Counter(fruits).most_common(1)", "[('táo', 2)]."),
+            ("print(top[0][0], top[0][1])", "táo 2."),
+        ],
+        mistakes=["Nhập cả tuple `('Lan', 3)` thay vì chỉ tên → sai kiểu mật mã."],
+    ),
+    "14-5": Theory(
+        concept=[
+            "`deque(ds, maxlen=n)` chỉ giữ tối đa n phần tử; thêm vào thì phần tử cũ nhất bị đẩy ra.",
+            "Rất hợp để lưu \"n lần gần nhất\" (lịch sử, điểm số, tin nhắn).",
+        ],
+        starter_notes=[
+            ("from collections import deque", "Nạp deque."),
+            ("recent = deque(maxlen=3)", "Hàng chỉ giữ 3 phần tử."),
+            ("print(recent)", "In deque([], maxlen=3)."),
+        ],
+        example=[
+            ("from collections import deque", ""),
+            ("last_two = deque(maxlen=2)", ""),
+            ("for page in [1, 2, 3, 4]:", "Lật trang."),
+            ("    last_two.append(page)", ""),
+            ("print(list(last_two))", "[3, 4]."),
+        ],
+        mistakes=["Quên `maxlen=` → deque giữ hết mọi phần tử."],
+    ),
+    "15-2": Theory(
+        concept=[
+            "`ngay.weekday()` cho thứ trong tuần dạng số: 0 = thứ Hai ... 6 = Chủ nhật.",
+            "`ngay.isoweekday()` thì 1 = thứ Hai ... 7 = Chủ nhật.",
+        ],
+        starter_notes=[
+            ("from datetime import date", "Nạp kiểu date."),
+            ("print(date.fromisoformat(day))", "In 2026-09-05."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ("from datetime import date", ""),
+            ('names = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]', ""),
+            ("print(names[date(2026, 1, 1).weekday()])", "T5 - thứ Năm."),
+        ],
+        mistakes=["Tưởng 0 là Chủ nhật như vài nước khác - trong Python 0 là thứ Hai."],
+    ),
+    "15-3": Theory(
+        concept=[
+            "`timedelta(days=n)` là khoảng thời gian n ngày. Ngày + timedelta → ngày mới (tự xử lý hết tháng, năm nhuận).",
+            "`str(ngay)` hoặc `ngay.isoformat()` cho chuỗi dạng \"2026-02-15\".",
+        ],
+        starter_notes=[
+            ("from datetime import date, timedelta", "Nạp hai kiểu."),
+            ("print(timedelta(days=1))", "In 1 day, 0:00:00."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ("from datetime import date, timedelta", ""),
+            ("today = date(2026, 12, 25)", ""),
+            ("print(today + timedelta(days=10))", "2027-01-04 - tự sang năm mới."),
+        ],
+        mistakes=["Cộng số thẳng vào ngày (`date + 45`) báo lỗi - phải dùng timedelta."],
+    ),
+    "15-4": Theory(
+        concept=[
+            "Trừ hai ngày → khoảng cách; `.days` là số ngày.",
+            "Đổi đơn vị: số tuần = số ngày // 7, ngày lẻ = số ngày % 7.",
+        ],
+        starter_notes=[
+            ("from datetime import date", "Nạp kiểu date."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ("from datetime import date", ""),
+            ("gap = date(2026, 6, 1) - date(2026, 5, 1)", ""),
+            ("print(gap.days, gap.days // 7, gap.days % 7)", "31 4 3."),
+        ],
+        mistakes=["Trừ ngược (sớm - muộn) ra số âm."],
+    ),
+    "15-5": Theory(
+        concept=[
+            "`ngay.strftime(mau)` đổi ngày thành chuỗi theo mẫu tuỳ ý.",
+            "Mã hay dùng: `%d` ngày (2 chữ số), `%m` tháng, `%Y` năm 4 chữ số, `%H:%M` giờ:phút.",
+        ],
+        starter_notes=[
+            ("from datetime import date", "Nạp kiểu date."),
+            ("print(date.fromisoformat(day))", "In 2026-11-20."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ("from datetime import date", ""),
+            ("d = date(2026, 3, 8)", ""),
+            ('print(d.strftime("%d-%m"))', "08-03."),
+            ('print(d.strftime("Năm %Y"))', "Năm 2026."),
+        ],
+        mistakes=["`%y` (chữ thường) chỉ có 2 chữ số năm: 26 thay vì 2026."],
+    ),
+})
+
+
+# ================================================================ GIAI ĐOẠN 3 - 5
+PRACTICE_THEORY.update({
+    "16-4": Theory(
+        concept=[
+            "Chia cho 0 gây `ZeroDivisionError` - chương trình dừng nếu không bắt lỗi.",
+            "Đặt try/except BÊN TRONG vòng lặp để một phần tử hỏng không làm hỏng cả vòng lặp.",
+        ],
+        starter_notes=[
+            ("total = 0", "Biến tổng."),
+            ("for a, b in pairs:", "Duyệt từng cặp."),
+            ("    total += a // b", "Cặp (5, 0) sẽ gây lỗi chia cho 0."),
+            ("print(total)", "Không bao giờ chạy tới."),
+        ],
+        example=[
+            ("ages = [12, 0, 15]", "Một tuổi bị nhập sai là 0."),
+            ("for age in ages:", ""),
+            ("    try:", ""),
+            ("        print(100 // age)", ""),
+            ("    except ZeroDivisionError:", ""),
+            ('        print("Bỏ qua tuổi 0")', "Vòng lặp vẫn chạy tiếp."),
+        ],
+        mistakes=["Đặt try bên ngoài vòng for: gặp lỗi là thoát luôn cả vòng lặp."],
+    ),
+    "16-5": Theory(
+        concept=[
+            "`raise LoaiLoi(\"thông báo\")` tự tạo ra lỗi - dùng khi dữ liệu sai mà hàm không xử lý được.",
+            "Hàm chỉ báo lỗi; nơi GỌI hàm quyết định xử lý thế nào bằng try/except.",
+        ],
+        starter_notes=[
+            ("def check(n):", "Hàm kiểm tra số bước."),
+            ("    return n", "Chưa kiểm tra gì - số âm cũng cho qua."),
+            ("for n in moves:", "Duyệt từng số bước."),
+            ("    hero.move_right(check(n))", "Đi theo số bước đã kiểm tra."),
+        ],
+        example=[
+            ("def set_age(age):", ""),
+            ("    if age < 0:", "Tuổi âm là vô lý."),
+            ('        raise ValueError("Tuổi không được âm")', "Báo lỗi."),
+            ("    return age", ""),
+            ("try:", ""),
+            ("    set_age(-5)", ""),
+            ("except ValueError as error:", "Bắt lỗi và đọc thông báo."),
+            ("    print(error)", "Tuổi không được âm."),
+        ],
+        mistakes=["Viết `return ValueError(...)` - trả về lỗi chứ không ném lỗi."],
+    ),
+    "17-4": Theory(
+        concept=[
+            "PHƯƠNG THỨC là hàm viết trong class, tham số đầu luôn là `self` - chính đồ vật đó.",
+            "Gọi phương thức: `doi_tuong.ten(...)` - Python tự truyền doi_tuong vào self.",
+            "Phương thức có thể đọc và sửa thuộc tính: `self.total += amount`.",
+        ],
+        starter_notes=[
+            ("class Wallet:", "Class chiếc ví."),
+            ("    def __init__(self):", "Chạy khi tạo ví."),
+            ("        self.total = 0", "Ví mới có 0 đồng."),
+            ("w = Wallet()", "Tạo một chiếc ví."),
+            ("print(w.total)", "In 0."),
+        ],
+        example=[
+            ("class Plant:", ""),
+            ("    def __init__(self):", ""),
+            ("        self.height = 1", ""),
+            ("    def water(self):", "Phương thức tưới cây."),
+            ("        self.height += 2", ""),
+            ("tree = Plant()", ""),
+            ("tree.water()", ""),
+            ("print(tree.height)", "3."),
+        ],
+        mistakes=["Quên `self` ở tham số đầu: gọi phương thức sẽ báo TypeError."],
+    ),
+    "17-5": Theory(
+        concept=[
+            "`__len__(self)` quyết định `len(doi_tuong)` trả về bao nhiêu - phải return số nguyên.",
+            "Các magic method khác: `__str__` (print), `__add__` (+), `__eq__` (==), `__lt__` (<).",
+        ],
+        starter_notes=[
+            ("class Team:", "Class đội."),
+            ("    def __init__(self, members):", "Nhận danh sách thành viên."),
+            ("        self.members = members", "Cất danh sách."),
+            ("team = Team(members)", "Tạo đội."),
+            ("print(team.members)", "In danh sách."),
+        ],
+        example=[
+            ("class Playlist:", ""),
+            ("    def __init__(self, songs):", ""),
+            ("        self.songs = songs", ""),
+            ("    def __len__(self):", ""),
+            ("        return len(self.songs)", ""),
+            ('print(len(Playlist(["A", "B", "C"])))', "3."),
+        ],
+        mistakes=["Gọi `len(team)` khi chưa có `__len__` → TypeError."],
+    ),
+    "18-2": Theory(
+        concept=[
+            "Bài ôn tập: kết hợp dict tra vũ khí, vòng lặp hạ quái, move_to và try/except mở cửa kẹt.",
+            "Chia việc thành từng bước nhỏ, chạy thử sau mỗi bước.",
+        ],
+        starter_notes=[
+            ('weakness = {"robot": "hammer", "barrel": "axe", "cannon": "bow"}', "Bảng vũ khí."),
+            ("for enemy in hero.find_enemies():", "Duyệt từng quái."),
+            ('    print(enemy["type"], enemy["x"], enemy["y"])', "In thông tin để xem."),
+        ],
+        example=[
+            ('sounds = {"mèo": "meo", "chó": "gâu"}', ""),
+            ('for pet in ["chó", "mèo"]:', ""),
+            ("    print(sounds[pet])", "gâu, meo."),
+            ("while True:", "Thử tới khi được."),
+            ("    try:", ""),
+            ('        value = int("5")', ""),
+            ("        break", ""),
+            ("    except ValueError:", ""),
+            ("        pass", ""),
+        ],
+        mistakes=["Đi tới cửa trước khi hạ hết quái - quái chặn đường."],
+    ),
+    "18-3": Theory(
+        concept=[
+            "Hàm có thể trả về cả một list - kết hợp tốt với list comprehension.",
+            "`ch.isdigit()` kiểm tra ký tự có phải chữ số.",
+        ],
+        starter_notes=[
+            ("def digits(text):", "Hàm lấy các chữ số."),
+            ("    return []", "Đang trả về list rỗng."),
+            ("print(digits(scroll))", "In [] - chưa có gì."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ("def vowels(word):", ""),
+            ('    return [ch for ch in word if ch in "aeiou"]', ""),
+            ('print(vowels("python"))', "['o']."),
+            ('print(len(vowels("banana")))', "3."),
+        ],
+        mistakes=["Quên `int(ch)` → sum không cộng được các chuỗi."],
+    ),
+    "18-4": Theory(
+        concept=[
+            "Bài ôn tập class + `__iter__`: tự tạo một lộ trình mà `for` / `hero.follow` duyệt được.",
+            "Trong `__iter__` có thể dùng vòng lặp để tạo list, rồi `return iter(list)`.",
+        ],
+        starter_notes=[
+            ("class Route:", "Class lộ trình."),
+            ("    def __init__(self, size):", "Nhận số bậc."),
+            ("        self.size = size", "Cất số bậc."),
+            ('hero.follow(["right", "down"])', "Đi theo một list cố định - chỉ 1 bậc."),
+        ],
+        example=[
+            ("class Countdown:", ""),
+            ("    def __init__(self, start):", ""),
+            ("        self.start = start", ""),
+            ("    def __iter__(self):", ""),
+            ("        numbers = []", ""),
+            ("        for n in range(self.start, 0, -1):", ""),
+            ("            numbers.append(n)", ""),
+            ("        return iter(numbers)", ""),
+            ("print(list(Countdown(3)))", "[3, 2, 1]."),
+        ],
+        mistakes=["Trả về list thay vì iter(list) → TypeError."],
+    ),
+    "18-5": Theory(
+        concept=[
+            "Bài ôn tập: try/except để bỏ qua dữ liệu hỏng, set để bỏ dữ liệu trùng.",
+            "`except ValueError: pass` - bắt lỗi rồi bỏ qua, không làm gì.",
+        ],
+        starter_notes=[
+            ("values = []", "List các số."),
+            ("for text in candidates:", "Duyệt từng chuỗi."),
+            ("    values.append(int(text))", "Chuỗi \"x\" sẽ gây ValueError."),
+        ],
+        example=[
+            ('inputs = ["3", "ba", "3"]', ""),
+            ("seen = set()", ""),
+            ("for text in inputs:", ""),
+            ("    try:", ""),
+            ("        seen.add(int(text))", ""),
+            ("    except ValueError:", ""),
+            ("        pass", ""),
+            ("print(seen)", "{3}."),
+        ],
+        mistakes=["Dùng list thay set: số 4 bị cộng hai lần."],
+    ),
+    "19-3": Theory(
+        concept=[
+            "`max(ds, key=ham)` tìm phần tử có ham(phần tử) lớn nhất. `sorted(ds, key=ham)` sắp xếp theo ham.",
+            "`lambda p: p[1]` là hàm lấy phần tử thứ hai của tuple - viết ngay tại chỗ.",
+        ],
+        starter_notes=[
+            ("print(sorted(players))", "Sắp xếp theo tên (phần tử đầu tuple)."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ('words = ["kiwi", "táo", "dưa hấu"]', ""),
+            ("print(max(words, key=lambda w: len(w)))", "dưa hấu - từ dài nhất."),
+            ("print(sorted(words, key=lambda w: len(w)))", "Ngắn tới dài."),
+        ],
+        mistakes=["Nhập cả tuple (\"Bình\", 9) thay vì chỉ tên."],
+    ),
+    "19-4": Theory(
+        concept=[
+            "`enumerate(ds)` cho cặp (vị trí, phần tử) - không cần tự đếm vị trí.",
+            "`break` dừng vòng lặp ngay khi tìm thấy.",
+            "Với list có sẵn còn có `ds.index(x)` tìm vị trí đầu tiên của x.",
+        ],
+        starter_notes=[
+            ("for step in route:", "Duyệt từng bước nhưng không biết vị trí."),
+            ("    print(step)", "In từng bước."),
+        ],
+        example=[
+            ('queue = ["An", "Bình", "Chi"]', ""),
+            ("for i, name in enumerate(queue, start=1):", "Đánh số từ 1."),
+            ('    print(i, name)', "1 An, 2 Bình, 3 Chi."),
+        ],
+        mistakes=["Quên break: vị trí cuối cùng gặp \"down\" sẽ ghi đè vị trí đầu."],
+    ),
+    "19-5": Theory(
+        concept=[
+            "`any(dieu_kien for x in ds)` → True nếu ÍT NHẤT MỘT phần tử thoả.",
+            "`all(dieu_kien for x in ds)` → True nếu MỌI phần tử thoả.",
+        ],
+        starter_notes=[
+            ("if temps[0] > 30:", "Chỉ xét ngày đầu tiên."),
+            ('    hero.say("Nóng")', ""),
+            ("else:", ""),
+            ('    hero.say("Mát")', ""),
+            ("hero.move_right(5)", "Đi tới cúp."),
+        ],
+        example=[
+            ("scores = [8, 9, 7]", ""),
+            ("print(all(s >= 5 for s in scores))", "True - đều trên trung bình."),
+            ("print(any(s == 10 for s in scores))", "False - không có điểm 10."),
+        ],
+        mistakes=["`any(temps) > 30` sai: any trả về True/False, không phải số."],
+    ),
+    "20-3": Theory(
+        concept=[
+            "`re.findall(mau, text)` trả về list MỌI chỗ khớp; `re.search` chỉ tìm chỗ đầu tiên.",
+            "Mẫu `\\d+`: một hoặc nhiều chữ số liền nhau.",
+        ],
+        starter_notes=[
+            ("import re", "Nạp regex."),
+            ('print(re.search(r"\\d+", letter).group())', "In 3 - chỉ số đầu tiên."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ("import re", ""),
+            ('order = "2 bánh, 10 kẹo, 1 sữa"', ""),
+            ('numbers = re.findall(r"\\d+", order)', "['2', '10', '1']."),
+            ("print(sum(int(n) for n in numbers))", "13."),
+        ],
+        mistakes=["Cộng thẳng list chuỗi → TypeError; phải int từng phần tử."],
+    ),
+    "20-4": Theory(
+        concept=[
+            "Lượng từ trong regex: `{3}` đúng 3 lần, `+` một hoặc nhiều, `*` không hoặc nhiều, `?` có hoặc không.",
+            "`[A-Z]` một chữ in hoa, `[0-9]` hay `\\d` một chữ số.",
+            "`re.fullmatch` khớp TOÀN BỘ chuỗi; `re.search` chỉ cần khớp một phần.",
+        ],
+        starter_notes=[
+            ("import re", "Nạp regex."),
+            ("print(len(codes))", "In 4 - tổng số mã."),
+            ("hero.move_right(2)", "Đi phải 2."),
+            ("hero.move_down(1)", "Xuống 1."),
+        ],
+        example=[
+            ("import re", ""),
+            ('phones = ["0912345678", "123", "0987654321"]', ""),
+            ('ok = [p for p in phones if re.fullmatch(r"0\\d{9}", p)]', "Số 10 chữ số bắt đầu bằng 0."),
+            ("print(ok)", "Hai số hợp lệ."),
+        ],
+        mistakes=["Dùng re.search thì \"EF-7890\" cũng có thể khớp một phần - nên dùng fullmatch."],
+    ),
+    "20-5": Theory(
+        concept=[
+            "Thẻ XML có thể chứa nhiều thuộc tính: `the.get(\"weapon\")` đọc từng thuộc tính.",
+            "Dữ liệu điều khiển game (bản đồ, lệnh) thường được lưu bằng XML hoặc JSON.",
+        ],
+        starter_notes=[
+            ("import xml.etree.ElementTree as ET", "Nạp bộ đọc XML."),
+            ("root = ET.fromstring(room_xml)", "Đọc chuỗi XML."),
+            ('print(len(root.findall("enemy")))', "In 3 - số thẻ enemy."),
+        ],
+        example=[
+            ("import xml.etree.ElementTree as ET", ""),
+            ("data = '<menu><dish name=\"phở\" price=\"40\"/><dish name=\"bún\" price=\"35\"/></menu>'", ""),
+            ("root = ET.fromstring(data)", ""),
+            ('for dish in root.findall("dish"):', ""),
+            ('    print(dish.get("name"), int(dish.get("price")))', ""),
+        ],
+        mistakes=["Quên đổi toạ độ sang int → attack_target báo lỗi."],
+    ),
+    "21-3": Theory(
+        concept=[
+            "Closure nhớ biến của hàm ngoài: hàm `multiply` tạo trong `make_multiplier(3)` luôn nhớ k = 3.",
+            "Mỗi lần gọi hàm ngoài tạo ra một hàm mới với giá trị riêng: `double = make_multiplier(2)`.",
+        ],
+        starter_notes=[
+            ("def make_multiplier(k):", "Nhà máy tạo hàm nhân với k."),
+            ("    pass", "Chưa tạo gì."),
+            ("hero.move_right(2)", "Đi tới cạnh cửa."),
+        ],
+        example=[
+            ("def make_adder(bonus):", ""),
+            ("    def add(score):", ""),
+            ("        return score + bonus", "Nhớ bonus."),
+            ("    return add", ""),
+            ("plus_five = make_adder(5)", ""),
+            ("print(plus_five(10))", "15."),
+        ],
+        mistakes=["Quên `return` trong hàm con → kết quả là None."],
+    ),
+    "21-4": Theory(
+        concept=[
+            "Decorator có thể làm thêm việc TRƯỚC (hoặc SAU) khi gọi hàm gốc - ví dụ ghi log.",
+            "`func.__name__` là tên của hàm dạng chuỗi.",
+        ],
+        starter_notes=[
+            ("def announce(func):", "Decorator báo hiệu."),
+            ("    return func", "Đang trả hàm gốc - chưa thêm gì."),
+            ("@announce", "Gắn decorator vào hop."),
+            ("def hop():", "Chiêu nhảy gai."),
+            ("    hero.move_up()", ""),
+            ("    hero.move_right(2)", ""),
+            ("    hero.move_down()", ""),
+            ("hero.move_right(2)", "Tới trước gai đầu."),
+            ("hop()", "Nhảy 1 lần."),
+        ],
+        example=[
+            ("def log(func):", ""),
+            ("    def wrapper():", ""),
+            ('        print("Gọi", func.__name__)', "Làm thêm trước."),
+            ("        func()", ""),
+            ("    return wrapper", ""),
+            ("@log", ""),
+            ("def jump():", ""),
+            ('    print("Nhảy!")', ""),
+            ("jump()", "Gọi jump rồi Nhảy!"),
+        ],
+        mistakes=["Gọi `func` (không ngoặc) trong wrapper - hàm gốc không chạy."],
+    ),
+    "21-5": Theory(
+        concept=[
+            "Decorator có tham số cần 3 tầng: hàm nhận tham số → trả về decorator → decorator trả về wrapper.",
+            "`@repeat(4)` = gọi `repeat(4)` trước để lấy decorator, rồi dùng decorator đó bọc hàm.",
+        ],
+        starter_notes=[
+            ("def repeat(times):", "Nhận số lần lặp."),
+            ("    pass", "Chưa làm gì."),
+            ("def stair():", "Một bậc thang."),
+            ("    hero.move_right()", ""),
+            ("    hero.move_down()", ""),
+            ("stair()", "Chỉ xuống 1 bậc."),
+        ],
+        example=[
+            ("def shout(times):", ""),
+            ("    def decorator(func):", ""),
+            ("        def wrapper():", ""),
+            ("            for i in range(times):", ""),
+            ("                func()", ""),
+            ("        return wrapper", ""),
+            ("    return decorator", ""),
+            ("@shout(2)", ""),
+            ("def cheer():", ""),
+            ('    print("Cố lên!")', ""),
+            ("cheer()", "In 2 lần."),
+        ],
+        mistakes=["Viết `@repeat` không có (4) → times trở thành chính hàm stair."],
+    ),
+    "22-3": Theory(
+        concept=[
+            "Mảng NumPy có sẵn các phép thống kê: `.mean()` trung bình, `.max()`, `.min()`, `.std()` độ lệch chuẩn.",
+            "Kết quả là số của NumPy - đổi sang int / float khi cần.",
+        ],
+        starter_notes=[
+            ("import numpy as np", "Nạp NumPy."),
+            ("data = np.array(temps)", "Tạo mảng nhiệt độ."),
+            ("print(data.max())", "In 28."),
+        ],
+        example=[
+            ("import numpy as np", ""),
+            ("heights = np.array([150, 160, 155])", ""),
+            ("print(heights.mean())", "155.0."),
+            ("print(heights - 100)", "[50 60 55] - trừ mọi phần tử cùng lúc."),
+        ],
+        mistakes=["`data.mean` (không ngoặc) là chính hàm, chưa phải kết quả."],
+    ),
+    "22-4": Theory(
+        concept=[
+            "So sánh với mảng cho mảng True/False: `arr > 5` → `[False, True, ...]`.",
+            "Lọc bằng mảng True/False: `arr[arr > 5]` chỉ giữ phần tử ứng với True.",
+            "Đếm nhanh: `(arr > 5).sum()` vì True được tính là 1.",
+        ],
+        starter_notes=[
+            ("import numpy as np", "Nạp NumPy."),
+            ("arr = np.array(scores)", "Mảng điểm."),
+            ("print(arr > 5)", "In mảng True/False."),
+        ],
+        example=[
+            ("import numpy as np", ""),
+            ("ages = np.array([10, 15, 12, 17])", ""),
+            ("print(ages[ages >= 13])", "[15 17]."),
+            ("print((ages < 13).sum())", "2."),
+        ],
+        mistakes=["Dùng `and`/`or` với mảng → lỗi; NumPy dùng `&` và `|` kèm ngoặc."],
+    ),
+    "22-5": Theory(
+        concept=[
+            "`axis=0` tính theo cột (gộp các hàng), `axis=1` tính theo hàng (gộp các cột).",
+            "`.argmax()` trả về VỊ TRÍ của phần tử lớn nhất, `.argmin()` vị trí nhỏ nhất.",
+        ],
+        starter_notes=[
+            ("import numpy as np", "Nạp NumPy."),
+            ("table = np.array(sales)", "Bảng 3 × 3."),
+            ("print(table.sum())", "In tổng cả bảng."),
+        ],
+        example=[
+            ("import numpy as np", ""),
+            ("grades = np.array([[8, 6], [9, 7]])", "2 bạn, 2 môn."),
+            ("print(grades.sum(axis=1))", "[14 16] - tổng mỗi bạn."),
+            ("print(grades.sum(axis=1).argmax())", "1 - bạn thứ hai cao hơn."),
+        ],
+        mistakes=["Nhầm axis=0 và axis=1 - in thử ra để kiểm tra."],
+    ),
+    "23-3": Theory(
+        concept=[
+            "`NameError: name 'x' is not defined` - Python không biết tên x: gõ sai tên hoặc dùng trước khi tạo.",
+            "Cách sửa: so sánh tên ở chỗ tạo biến và chỗ dùng biến, từng chữ cái một.",
+        ],
+        starter_notes=[
+            ("steps = 6", "Tạo biến steps."),
+            ('message = "Tới rồi"', "Tạo biến message."),
+            ("hero.move_right(step)", "Tên dùng ở đây có khớp tên đã tạo không?"),
+            ("hero.say(mesage)", "Đếm số chữ s."),
+        ],
+        example=[
+            ('color = "xanh"', "Tạo đúng tên."),
+            ("print(color)", "Dùng đúng tên - chạy tốt."),
+            ("count = 3", ""),
+            ("print(count + 1)", "4."),
+        ],
+        mistakes=["Sửa tên ở chỗ dùng nhưng quên chỗ khác cũng gõ sai."],
+    ),
+    "23-4": Theory(
+        concept=[
+            "`TypeError` - dùng sai kiểu: nối chuỗi với số, đưa chuỗi vào nơi cần số...",
+            "Thông báo lỗi thường nói rõ hai kiểu bị trộn (str và int).",
+        ],
+        starter_notes=[
+            ("gems = len(hero.find_gems())", "gems là số."),
+            ('hero.say("Có " + gems + " ngọc")', "Nối chuỗi với số - lỗi."),
+            ('hero.move_right("4")', "Số bước đang là chuỗi."),
+        ],
+        example=[
+            ("pages = 12", ""),
+            ('print("Đọc " + str(pages) + " trang")', "Đổi số sang chuỗi."),
+            ('print(int("8") + 2)', "10 - đổi chuỗi sang số."),
+        ],
+        mistakes=["Sửa xong một lỗi rồi dừng - chạy lại để tìm lỗi tiếp theo."],
+    ),
+    "23-5": Theory(
+        concept=[
+            "Vòng `while` dừng khi điều kiện SAI. Nếu biến trong điều kiện không bao giờ đổi, vòng lặp chạy mãi.",
+            "Game sẽ dừng chương trình chạy quá lâu và báo lỗi - dấu hiệu của vòng lặp vô hạn.",
+        ],
+        starter_notes=[
+            ("count = 0", "Biến đếm bắt đầu từ 0."),
+            ("while count < 5:", "Lặp khi count nhỏ hơn 5."),
+            ("    hero.move_right()", "count không bao giờ đổi..."),
+        ],
+        example=[
+            ("water = 0", ""),
+            ("while water < 3:", ""),
+            ('    print("Rót thêm")', ""),
+            ("    water += 1", "Thay đổi biến điều kiện."),
+            ('print("Đầy cốc")', "Chạy sau 3 vòng."),
+        ],
+        mistakes=["Tăng biến đếm nhưng đặt NGOÀI vòng lặp (thụt lề sai)."],
+    ),
+})
+
+THEORY.update(PRACTICE_THEORY)
 
 
 # ======================================================================
@@ -4856,6 +7409,8 @@ MENU_TAB_Y = 132
 MENU_TAB_WIDTH = 224
 MENU_WORLDS_Y = 340
 MENU_ROWS_PER_COLUMN = 5
+MENU_LEVELS_OFFSET = 250
+MENU_LEVEL_WIDTH = 58
 INFO_RECT = pygame.Rect(768, 64, 496, 196)
 EDITOR_RECT = pygame.Rect(768, 270, 496, 372)
 BUTTON_Y = 652
@@ -5240,7 +7795,9 @@ class App:
         for world_index, world in enumerate(self._stage_worlds(self.menu_stage)):
             cell_x, cell_y = self._world_cell(world_index)
             for level_index, level in enumerate(world.levels):
-                rect = pygame.Rect(cell_x + 300 + level_index * 86, cell_y + 4, 80, 42)
+                rect = pygame.Rect(
+                    cell_x + MENU_LEVELS_OFFSET + level_index * (MENU_LEVEL_WIDTH + 6), cell_y + 6, MENU_LEVEL_WIDTH, 40
+                )
                 done = level.id in self.progress.completed
                 color = (46, 140, 86) if done else (70, 80, 120)
                 self.menu_buttons.append(Button(rect, level.id, lambda lv=level: self.open_level(lv), color))
@@ -5498,7 +8055,8 @@ class App:
             cell_x, cell_y = self._world_cell(world_index)
             done = sum(level.id in self.progress.completed for level in world.levels)
             label = self.font_bold.render(f"World {world.number} · {world.title}", True, COLOR_TEXT)
-            concept = self.font_small.render(f"{world.concept}  ·  {done}/{len(world.levels)} xong", True, COLOR_MUTED)
+            concept_text = self._fit_text(f"{world.concept}  ·  {done}/{len(world.levels)} xong", MENU_LEVELS_OFFSET - 12)
+            concept = self.font_small.render(concept_text, True, COLOR_MUTED)
             self.screen.blit(label, (cell_x, cell_y))
             self.screen.blit(concept, (cell_x, cell_y + 26))
 
@@ -5519,6 +8077,14 @@ class App:
         for index, line in enumerate(lines):
             rendered = self.font.render(line, True, COLOR_TEXT)
             self.screen.blit(rendered, (box.x + 20, box.y + 10 + index * 24))
+
+    def _fit_text(self, text: str, width: int) -> str:
+        """Shorten text with "…" so it fits in `width` pixels."""
+        if self.font_small.size(text)[0] <= width:
+            return text
+        while text and self.font_small.size(text + "…")[0] > width:
+            text = text[:-1]
+        return text + "…"
 
     def draw_play(self) -> None:
         world_info = world_of(self.level.id)

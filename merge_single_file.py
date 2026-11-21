@@ -18,8 +18,10 @@ OUTPUT = ROOT / "codequest_full.py"
 MODULE_ORDER = [
     "telex",
     "engine",
+    "levels_practice",
     "levels",
     "theory",
+    "theory_practice",
     "display",
     "completion",
     "editor",

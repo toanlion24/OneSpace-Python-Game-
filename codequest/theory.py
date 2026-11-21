@@ -1120,3 +1120,6 @@ THEORY.update({
         mistakes=["Đoán mò rồi sửa lung tung - hãy in giá trị ra để biết chắc."],
     ),
 })
+
+# Lý thuyết của các bài luyện tập thêm (tự đăng ký vào THEORY khi được import).
+from . import theory_practice  # noqa: F401

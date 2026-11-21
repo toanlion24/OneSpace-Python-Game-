@@ -8,7 +8,7 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
 đi đường, nhặt ngọc, hạ quái, giải mật mã mở cửa. Code chạy xong, nhân vật diễn lại từng bước
 để các em thấy ngay chương trình của mình đúng hay sai ở đâu.
 
-- **48 màn, 5 giai đoạn**: đi từ câu lệnh đầu tiên tới thư viện chuẩn, class, lập trình hàm, NumPy và gỡ lỗi.
+- **115 màn, 5 giai đoạn, mỗi World 5 bài**: đi từ câu lệnh đầu tiên tới thư viện chuẩn, class, lập trình hàm, NumPy và gỡ lỗi.
 - **Lý thuyết đi kèm từng màn**: khái niệm, đề bài, dữ liệu có sẵn, giải thích từng dòng code ban đầu,
   ví dụ minh hoạ (khác lời giải) và các lỗi hay gặp.
 - **Tự suy nghĩ**: game không hiện lời giải; nút Gợi ý chỉ gợi hướng.
@@ -39,11 +39,11 @@ Nếu Windows hiện "Windows protected your PC": bấm **More info → Run anyw
 
 | Giai đoạn | Các em học gì | World | Số màn |
 |---|---|---|---|
-| 1. Cú pháp & kiểu dữ liệu nền tảng | Câu lệnh, biến, `if`, vòng lặp, ép kiểu, hàm, xử lý chuỗi, list/tuple, dict/set, list comprehension, list lồng nhau | 1–10 | 23 |
-| 2. Thư viện chuẩn | Giao/hợp tập hợp, `math`, hoán vị – tổ hợp (`itertools`), `Counter`, `deque`, ngày giờ | 11–15 | 8 |
-| 3. Hướng đối tượng & xử lý lỗi | `try/except`, class, `__init__`, `__add__`, `__str__`, `__iter__`, màn trùm tổng hợp | 16–18 | 7 |
-| 4. Lập trình hàm & nâng cao | `map`, `filter`, `zip`, `lambda`, biểu thức chính quy, đọc XML, closure, decorator | 19–21 | 6 |
-| 5. NumPy & gỡ lỗi | Mảng và ma trận với NumPy, đọc thông báo lỗi, sửa lỗi cú pháp và lỗi logic | 22–23 | 4 |
+| 1. Cú pháp & kiểu dữ liệu nền tảng | Câu lệnh, biến, `if`, vòng lặp, ép kiểu, hàm, xử lý chuỗi, list/tuple, dict/set, list comprehension, list lồng nhau | 1–10 | 50 |
+| 2. Thư viện chuẩn | Giao/hợp tập hợp, `math`, hoán vị – tổ hợp (`itertools`), `Counter`, `deque`, ngày giờ | 11–15 | 25 |
+| 3. Hướng đối tượng & xử lý lỗi | `try/except`, class, `__init__`, `__add__`, `__str__`, `__iter__`, màn trùm tổng hợp | 16–18 | 15 |
+| 4. Lập trình hàm & nâng cao | `map`, `filter`, `zip`, `lambda`, biểu thức chính quy, đọc XML, closure, decorator | 19–21 | 15 |
+| 5. NumPy & gỡ lỗi | Mảng và ma trận với NumPy, đọc thông báo lỗi, sửa lỗi cú pháp và lỗi logic | 22–23 | 10 |
 
 Xong 3 giai đoạn đầu, học sinh nắm chắc Python cơ bản; giai đoạn 4–5 đưa các em lên trình độ trung cấp
 và sẵn sàng học tiếp khoa học dữ liệu, AI hoặc giải thuật.
@@ -94,14 +94,16 @@ python merge_single_file.py   # gộp toàn bộ code thành codequest_full.py
 ```
 
 **Lời giải mẫu không có trong repo công khai và không có trong bản `.exe`.**
-Giáo viên / người phát triển giữ lời giải ở `solutions/level_solutions.py` (đã `.gitignore`).
+Giáo viên / người phát triển giữ lời giải ở `solutions/level_solutions.py` và `solutions/practice_solutions.py` (đã `.gitignore`).
 Khi có file này: `python -m pytest` kiểm tra mọi lời giải thắng, và
 `python main.py --self-test` ghi báo cáo `selftest.txt`. Không có file này, các test cần lời giải tự bỏ qua.
 
 ```
 main.py                   Điểm khởi chạy
 codequest/engine.py       Luật chơi + chạy code người chơi an toàn (không phụ thuộc pygame)
-codequest/levels.py       5 giai đoạn, 23 world, 48 màn (bản đồ ASCII, code ban đầu, gợi ý)
+codequest/levels.py       5 giai đoạn, 23 world, 2-3 bài chính mỗi world (bản đồ ASCII, code ban đầu, gợi ý)
+codequest/levels_practice.py  Bài luyện tập thêm để mỗi world đủ 5 bài
+codequest/theory_practice.py  Lý thuyết cho bài luyện tập
 codequest/theory.py       Lý thuyết từng màn
 codequest/game.py         Giao diện: menu theo giai đoạn, bản đồ, phát lại hoạt ảnh, bảng tin
 codequest/editor.py       Trình soạn code (tô màu, tự thụt lề, bôi đen, copy/paste, undo, Telex)
@@ -116,7 +118,8 @@ tests/                    Bộ test
 ```
 
 Thêm màn mới: thêm `Level(...)` vào `WORLDS` trong `codequest/levels.py`, một mục trong
-`codequest/theory.py` và lời giải trong `solutions/level_solutions.py`, rồi chạy `python -m pytest`.
+`codequest/theory.py` và lời giải trong `solutions/level_solutions.py` (bài luyện tập: `levels_practice.py`,
+`theory_practice.py`, `solutions/practice_solutions.py`), rồi chạy `python -m pytest`.
 
 ---
 

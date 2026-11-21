@@ -545,6 +545,19 @@ ALLOWED_MODULES = {
 }
 
 
+def _time_without_sleep() -> Any:
+    import types
+
+    module = types.ModuleType("time")
+    for attribute in dir(time):
+        if attribute != "sleep" and not attribute.startswith("__"):
+            setattr(module, attribute, getattr(time, attribute))
+    return module
+
+
+_TIME_WITHOUT_SLEEP = _time_without_sleep()
+
+
 def _safe_import(
     name: str,
     globals_: Any = None,
@@ -552,6 +565,10 @@ def _safe_import(
     fromlist: Any = (),
     level: int = 0,
 ) -> Any:
+    if level == 0 and name == "time":
+        # datetime.strftime tự import "time" bên trong. Trả về bản không có sleep để
+        # code học sinh không thể làm treo game.
+        return _TIME_WITHOUT_SLEEP
     if level > 0:
         # Thư viện được phép (ví dụ NumPy) đôi khi tự import tương đối bên trong nó.
         package = (globals_ or {}).get("__package__") or ""
@@ -589,7 +606,24 @@ def _is_closure(node: ast.AST) -> bool:
     )
 
 
-OPERATOR_TOKENS: dict[str, type] = {"&": ast.BitAnd, "|": ast.BitOr, "-": ast.Sub, "@": ast.MatMult}
+OPERATOR_TOKENS: dict[str, type] = {
+    "&": ast.BitAnd, "|": ast.BitOr, "-": ast.Sub, "@": ast.MatMult, "^": ast.BitXor,
+}
+
+
+def _has_nested_for(nodes: list[ast.AST]) -> bool:
+    return any(
+        isinstance(n, ast.For) and any(isinstance(inner, ast.For) for inner in ast.walk(n) if inner is not n)
+        for n in nodes
+    )
+
+
+def _has_method(nodes: list[ast.AST]) -> bool:
+    return any(
+        isinstance(n, ast.ClassDef)
+        and any(isinstance(item, ast.FunctionDef) and not item.name.startswith("__") for item in n.body)
+        for n in nodes
+    )
 
 
 def _check_one(requirement: str, nodes: list[ast.AST], call_names: set[str], imported: set[str]) -> bool:
@@ -600,6 +634,11 @@ def _check_one(requirement: str, nodes: list[ast.AST], call_names: set[str], imp
     if requirement.startswith("dunder:"):
         name = requirement[7:]
         return any(isinstance(n, ast.FunctionDef) and n.name == name for n in nodes)
+    if requirement.startswith("except:"):
+        name = requirement[7:]
+        return any(
+            isinstance(n, ast.ExceptHandler) and isinstance(n.type, ast.Name) and n.type.id == name for n in nodes
+        )
     if requirement.startswith("op:"):
         operator_type = OPERATOR_TOKENS[requirement[3:]]
         return any(isinstance(n, ast.BinOp) and isinstance(n.op, operator_type) for n in nodes)
@@ -628,6 +667,19 @@ REQUIREMENT_CHECKS: dict[str, Any] = {
         isinstance(n, ast.FunctionDef) and n.decorator_list for n in nodes
     ),
     "closure": lambda nodes, calls: any(_is_closure(n) for n in nodes),
+    "boolop": lambda nodes, calls: any(isinstance(n, ast.BoolOp) for n in nodes),
+    "nested_for": lambda nodes, calls: _has_nested_for(nodes),
+    "subscript": lambda nodes, calls: any(
+        isinstance(n, ast.Subscript) and not isinstance(n.slice, ast.Slice) for n in nodes
+    ),
+    "membership": lambda nodes, calls: any(
+        isinstance(n, ast.Compare) and any(isinstance(op, (ast.In, ast.NotIn)) for op in n.ops) for n in nodes
+    ),
+    "subset": lambda nodes, calls: "issubset" in calls or any(
+        isinstance(n, ast.Compare) and any(isinstance(op, (ast.LtE, ast.GtE)) for op in n.ops) for n in nodes
+    ),
+    "method": lambda nodes, calls: _has_method(nodes),
+    "raise": lambda nodes, calls: any(isinstance(n, ast.Raise) for n in nodes),
     "except_value_error": lambda nodes, calls: any(
         isinstance(n, ast.ExceptHandler) and isinstance(n.type, ast.Name) and n.type.id == "ValueError"
         for n in nodes
@@ -652,6 +704,13 @@ REQUIREMENT_LABELS: dict[str, str] = {
     "class": "định nghĩa class",
     "decorator": "decorator @...",
     "closure": "closure (hàm trả về hàm bên trong)",
+    "boolop": "and / or",
+    "nested_for": "vòng lặp for lồng nhau",
+    "subscript": "lấy phần tử theo vị trí [i]",
+    "membership": "toán tử in",
+    "subset": "kiểm tra tập con (issubset hoặc <=)",
+    "method": "phương thức tự viết trong class",
+    "raise": "lệnh raise",
     "except_value_error": "except ValueError",
 }
 
@@ -668,6 +727,8 @@ def requirement_label(requirement: str) -> str:
             parts.append(f"phương thức {option[7:]}")
         elif option.startswith("op:"):
             parts.append(f"toán tử {option[3:]}")
+        elif option.startswith("except:"):
+            parts.append(f"except {option[7:]}")
         else:
             parts.append(REQUIREMENT_LABELS[option])
     return " hoặc ".join(parts)

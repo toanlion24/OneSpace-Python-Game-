@@ -22,7 +22,7 @@ from codequest.assets import LOGO_ICON_BOX
 from codequest.engine import ALLOWED_MODULES
 
 BUILD_DIR = ROOT / "build"
-DIST_DIR = ROOT / "dist"
+DIST_DIR = ROOT / "dist" / f"v{__version__}"  # thư mục riêng mỗi phiên bản: không đụng bản đang mở
 RELEASE_DIR = ROOT / "release"
 STAGING_KIT = BUILD_DIR / "gamekit"
 APP_NAME = "OneSpace-CodeQuest"
@@ -44,7 +44,7 @@ GUIDE = f"""ONESPACE CODEQUEST - HỌC PYTHON QUA TRÒ CHƠI (v{__version__})
 ==============================================================
 
 Trò chơi học lập trình: viết code Python để đưa nhân vật vượt màn.
-48 màn chia 5 giai đoạn, từ câu lệnh đầu tiên tới NumPy và gỡ lỗi.
+115 màn chia 5 giai đoạn (mỗi World 5 bài), từ câu lệnh đầu tiên tới NumPy và gỡ lỗi.
 Dành cho học sinh THCS - THPT.
 
 CÁCH MỞ GAME

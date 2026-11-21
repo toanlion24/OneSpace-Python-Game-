@@ -16,18 +16,27 @@ from .engine import run_code
 from .levels import all_levels
 
 SOLUTIONS_FILE = PROJECT_ROOT / "solutions" / "level_solutions.py"
+PRACTICE_SOLUTIONS_FILE = PROJECT_ROOT / "solutions" / "practice_solutions.py"
 
 
-def load_solutions(path: Path = SOLUTIONS_FILE) -> dict[str, str] | None:
-    """Return {level_id: solution code}, or None when the private file is not present."""
+def _load_dict(path: Path, name: str) -> dict[str, str] | None:
     if not path.exists():
         return None
-    spec = importlib.util.spec_from_file_location("level_solutions", path)
+    spec = importlib.util.spec_from_file_location(path.stem, path)
     if spec is None or spec.loader is None:
         return None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return dict(module.SOLUTIONS)
+    return dict(getattr(module, name))
+
+
+def load_solutions(path: Path = SOLUTIONS_FILE) -> dict[str, str] | None:
+    """Return {level_id: solution code}, or None when the private files are not present."""
+    solutions = _load_dict(path, "SOLUTIONS")
+    if solutions is None:
+        return None
+    solutions.update(_load_dict(PRACTICE_SOLUTIONS_FILE, "SOLUTIONS_PRACTICE") or {})
+    return solutions
 
 
 def run_self_test() -> int:

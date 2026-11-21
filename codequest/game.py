@@ -39,6 +39,8 @@ MENU_TAB_Y = 132
 MENU_TAB_WIDTH = 224
 MENU_WORLDS_Y = 340
 MENU_ROWS_PER_COLUMN = 5
+MENU_LEVELS_OFFSET = 250
+MENU_LEVEL_WIDTH = 58
 INFO_RECT = pygame.Rect(768, 64, 496, 196)
 EDITOR_RECT = pygame.Rect(768, 270, 496, 372)
 BUTTON_Y = 652
@@ -423,7 +425,9 @@ class App:
         for world_index, world in enumerate(self._stage_worlds(self.menu_stage)):
             cell_x, cell_y = self._world_cell(world_index)
             for level_index, level in enumerate(world.levels):
-                rect = pygame.Rect(cell_x + 300 + level_index * 86, cell_y + 4, 80, 42)
+                rect = pygame.Rect(
+                    cell_x + MENU_LEVELS_OFFSET + level_index * (MENU_LEVEL_WIDTH + 6), cell_y + 6, MENU_LEVEL_WIDTH, 40
+                )
                 done = level.id in self.progress.completed
                 color = (46, 140, 86) if done else (70, 80, 120)
                 self.menu_buttons.append(Button(rect, level.id, lambda lv=level: self.open_level(lv), color))
@@ -681,7 +685,8 @@ class App:
             cell_x, cell_y = self._world_cell(world_index)
             done = sum(level.id in self.progress.completed for level in world.levels)
             label = self.font_bold.render(f"World {world.number} · {world.title}", True, COLOR_TEXT)
-            concept = self.font_small.render(f"{world.concept}  ·  {done}/{len(world.levels)} xong", True, COLOR_MUTED)
+            concept_text = self._fit_text(f"{world.concept}  ·  {done}/{len(world.levels)} xong", MENU_LEVELS_OFFSET - 12)
+            concept = self.font_small.render(concept_text, True, COLOR_MUTED)
             self.screen.blit(label, (cell_x, cell_y))
             self.screen.blit(concept, (cell_x, cell_y + 26))
 
@@ -702,6 +707,14 @@ class App:
         for index, line in enumerate(lines):
             rendered = self.font.render(line, True, COLOR_TEXT)
             self.screen.blit(rendered, (box.x + 20, box.y + 10 + index * 24))
+
+    def _fit_text(self, text: str, width: int) -> str:
+        """Shorten text with "…" so it fits in `width` pixels."""
+        if self.font_small.size(text)[0] <= width:
+            return text
+        while text and self.font_small.size(text + "…")[0] > width:
+            text = text[:-1]
+        return text + "…"
 
     def draw_play(self) -> None:
         world_info = world_of(self.level.id)
