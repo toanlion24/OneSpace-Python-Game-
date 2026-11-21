@@ -1,4 +1,4 @@
-"""Level data, organised into the 5 stages of the HackerRank Python path.
+"""Level data: 5 giai đoạn học Python, từ nền tảng tới nâng cao.
 
 Map legend:
     #  tường        .  sàn          @  hero        E  cổng đích (cúp)
@@ -21,7 +21,7 @@ from .engine import Level
 class Stage:
     number: int
     title: str
-    subdomains: str
+    skills: str
     content: str
     focus: str
     milestone: str
@@ -33,7 +33,7 @@ class World:
     stage: int
     title: str
     concept: str
-    hackerrank: str
+    skill: str
     background: int
     levels: list[Level]
 
@@ -42,7 +42,7 @@ STAGES: list[Stage] = [
     Stage(
         1,
         "Cú pháp & kiểu dữ liệu nền tảng",
-        "Introduction · Basic Data Types · Strings",
+        "Nhập môn · Kiểu dữ liệu · Chuỗi",
         "Nhập/xuất, if-else, vòng lặp, hàm cơ bản, xử lý chuỗi (cắt, định dạng), list, tuple, dictionary.",
         "List Comprehension và list lồng nhau - viết code ngắn gọn thay cho nhiều vòng lặp lồng nhau.",
         "Nền móng cho mọi giai đoạn sau.",
@@ -50,34 +50,34 @@ STAGES: list[Stage] = [
     Stage(
         2,
         "Sức mạnh thư viện chuẩn",
-        "Sets · Math · Itertools · Collections · Date and Time",
+        "Tập hợp · Toán học · Hoán vị - tổ hợp · Cấu trúc dữ liệu · Ngày giờ",
         "Phép toán tập hợp (giao, hợp), hoán vị - tổ hợp với itertools, Counter / deque trong collections, ngày giờ.",
         "Dùng đúng set hoặc Counter để tra cứu nhanh thay vì duyệt list nhiều lần.",
-        "Giải bài thuật toán nhanh hơn hẳn.",
+        "Giải các bài toán đếm, tìm kiếm, sắp xếp nhanh và gọn hơn hẳn.",
     ),
     Stage(
         3,
         "Lập trình hướng đối tượng & ngoại lệ",
-        "Errors and Exceptions · Classes",
+        "Xử lý lỗi · Lập trình hướng đối tượng",
         "Bắt lỗi an toàn với try-except, thiết kế class, thuộc tính, magic methods (__str__, __add__, __iter__).",
         "Tự tạo kiểu dữ liệu của riêng mình và giữ chương trình không bị dừng khi gặp lỗi.",
-        "Xong 3 giai đoạn đầu: đủ kiến thức thi chứng chỉ HackerRank Python (Basic).",
+        "Xong 3 giai đoạn đầu: vững toàn bộ kiến thức Python cơ bản.",
     ),
     Stage(
         4,
         "Lập trình hàm & kỹ thuật nâng cao",
-        "Built-Ins · Python Functionals · Regex and Parsing · XML · Closures and Decorators",
+        "Hàm có sẵn · Lập trình hàm · Biểu thức chính quy · XML · Closure và decorator",
         "map, filter, zip, lambda, biểu thức chính quy (regex), đọc XML, closure và decorator.",
         "Viết hàm nhận hàm, trả về hàm - mở rộng logic mà không sửa code cũ.",
-        "Trọng tâm của chứng chỉ HackerRank Python (Intermediate).",
+        "Bước lên trình độ Python trung cấp.",
     ),
     Stage(
         5,
         "NumPy & gỡ lỗi thực chiến",
-        "NumPy · Debugging",
+        "Tính toán với NumPy · Gỡ lỗi",
         "Mảng nhiều chiều với NumPy, phép tính ma trận cơ bản, đọc hiểu và sửa lỗi trong code có sẵn.",
         "Rèn kỹ năng đọc thông báo lỗi và tìm lỗi logic.",
-        "Hướng tới huy hiệu 5 sao Python, rồi sang nhánh Problem Solving.",
+        "Sẵn sàng học tiếp khoa học dữ liệu, AI và giải thuật nâng cao.",
     ),
 ]
 
@@ -115,7 +115,7 @@ MAP_WEAPON_ROOM = [
 
 WORLDS: list[World] = [
     # ================================================================ GIAI ĐOẠN 1
-    World(1, 1, "Khởi hành", "Cú pháp cơ bản", "Introduction", 1, [
+    World(1, 1, "Khởi hành", "Cú pháp cơ bản", "Nhập môn", 1, [
         Level(
             id="1-1",
             title="Bước chân đầu tiên",
@@ -174,7 +174,7 @@ WORLDS: list[World] = [
             say_contains="Xin chào",
         ),
     ]),
-    World(2, 1, "Kho đồ", "Biến và kiểu dữ liệu", "Basic Data Types", 2, [
+    World(2, 1, "Kho đồ", "Biến và kiểu dữ liệu", "Kiểu dữ liệu", 2, [
         Level(
             id="2-1",
             title="Hộp chứa số bước",
@@ -219,7 +219,7 @@ WORLDS: list[World] = [
             say_contains="30",
         ),
     ]),
-    World(3, 1, "Ngã rẽ", "Câu lệnh điều kiện", "Introduction", 3, [
+    World(3, 1, "Ngã rẽ", "Câu lệnh điều kiện", "Nhập môn", 3, [
         Level(
             id="3-1",
             title="Quái chặn đường",
@@ -269,7 +269,7 @@ WORLDS: list[World] = [
             requires=["if"],
         ),
     ]),
-    World(4, 1, "Vòng lặp", "for và while", "Introduction", 4, [
+    World(4, 1, "Vòng lặp", "for và while", "Nhập môn", 4, [
         Level(
             id="4-1",
             title="Hàng ngọc",
@@ -318,7 +318,7 @@ WORLDS: list[World] = [
             requires=["while"],
         ),
     ]),
-    World(5, 1, "Biến hình", "Ép kiểu dữ liệu", "Basic Data Types", 5, [
+    World(5, 1, "Biến hình", "Ép kiểu dữ liệu", "Kiểu dữ liệu", 5, [
         Level(
             id="5-1",
             title="Mật mã chuỗi",
@@ -362,7 +362,7 @@ WORLDS: list[World] = [
             door_code=42,
         ),
     ]),
-    World(6, 1, "Phép thuật", "Hàm và hàm có sẵn", "Introduction", 1, [
+    World(6, 1, "Phép thuật", "Hàm và hàm có sẵn", "Nhập môn", 1, [
         Level(
             id="6-1",
             title="Chiêu nhảy gai",
@@ -426,7 +426,7 @@ WORLDS: list[World] = [
             door_code=42,
         ),
     ]),
-    World(7, 1, "Cuộn giấy", "Xử lý chuỗi", "Strings", 2, [
+    World(7, 1, "Cuộn giấy", "Xử lý chuỗi", "Chuỗi", 2, [
         Level(
             id="7-1",
             title="Cắt chữ",
@@ -477,7 +477,7 @@ WORLDS: list[World] = [
             say_contains="MÈO có 3 ngọc",
         ),
     ]),
-    World(8, 1, "Ba lô", "List và tuple", "Basic Data Types", 2, [
+    World(8, 1, "Ba lô", "List và tuple", "Kiểu dữ liệu", 2, [
         Level(
             id="8-1",
             title="Bản đồ kho báu",
@@ -525,7 +525,7 @@ WORLDS: list[World] = [
             kill_all=True,
         ),
     ]),
-    World(9, 1, "Sổ tay", "Dictionary và set", "Basic Data Types", 3, [
+    World(9, 1, "Sổ tay", "Dictionary và set", "Kiểu dữ liệu", 3, [
         Level(
             id="9-1",
             title="Điểm yếu",
@@ -567,7 +567,7 @@ WORLDS: list[World] = [
             say_contains="3",
         ),
     ]),
-    World(10, 1, "Đội hình", "List comprehension & list lồng nhau", "Basic Data Types", 4, [
+    World(10, 1, "Đội hình", "List comprehension & list lồng nhau", "Kiểu dữ liệu", 4, [
         Level(
             id="10-1",
             title="Lọc ngọc xanh",
@@ -624,7 +624,7 @@ WORLDS: list[World] = [
         ),
     ]),
     # ================================================================ GIAI ĐOẠN 2
-    World(11, 2, "Tập hợp", "Giao, hợp tập hợp", "Sets", 5, [
+    World(11, 2, "Tập hợp", "Giao, hợp tập hợp", "Tập hợp", 5, [
         Level(
             id="11-1",
             title="Hai trinh sát",
@@ -653,7 +653,7 @@ WORLDS: list[World] = [
             say_contains="4",
         ),
     ]),
-    World(12, 2, "Toán học", "Thư viện math", "Math", 6, [
+    World(12, 2, "Toán học", "Thư viện math", "Toán học", 6, [
         Level(
             id="12-1",
             title="Chiếc thang",
@@ -693,7 +693,7 @@ WORLDS: list[World] = [
             door_code=12,
         ),
     ]),
-    World(13, 2, "Hoán vị", "itertools", "Itertools", 1, [
+    World(13, 2, "Hoán vị", "itertools", "Hoán vị - tổ hợp", 1, [
         Level(
             id="13-1",
             title="Khoá ba rune",
@@ -740,7 +740,7 @@ WORLDS: list[World] = [
             door_code=96,
         ),
     ]),
-    World(14, 2, "Kho quân", "collections", "Collections", 2, [
+    World(14, 2, "Kho quân", "collections", "Cấu trúc dữ liệu", 2, [
         Level(
             id="14-1",
             title="Điểm danh quân địch",
@@ -792,7 +792,7 @@ WORLDS: list[World] = [
             door_code="Dũng",
         ),
     ]),
-    World(15, 2, "Lịch", "Ngày và giờ", "Date and Time", 3, [
+    World(15, 2, "Lịch", "Ngày và giờ", "Ngày giờ", 3, [
         Level(
             id="15-1",
             title="Đếm ngày tới hội trại",
@@ -815,7 +815,7 @@ WORLDS: list[World] = [
         ),
     ]),
     # ================================================================ GIAI ĐOẠN 3
-    World(16, 3, "Bẫy", "Xử lý ngoại lệ", "Errors and Exceptions", 6, [
+    World(16, 3, "Bẫy", "Xử lý ngoại lệ", "Xử lý lỗi", 6, [
         Level(
             id="16-1",
             title="Cửa kẹt",
@@ -886,7 +886,7 @@ WORLDS: list[World] = [
             door_code=42,
         ),
     ]),
-    World(17, 3, "Xưởng class", "Class & magic methods", "Classes", 5, [
+    World(17, 3, "Xưởng class", "Class & magic methods", "Lập trình hướng đối tượng", 5, [
         Level(
             id="17-1",
             title="Bình thuốc hồi máu",
@@ -971,7 +971,7 @@ WORLDS: list[World] = [
             requires=["dunder:__iter__", "call:follow"],
         ),
     ]),
-    World(18, 3, "Trùm giữa", "Tổng hợp giai đoạn 1-3", "Kiểm tra Python (Basic)", 4, [
+    World(18, 3, "Trùm giữa", "Tổng hợp giai đoạn 1-3", "Ôn tập Python cơ bản", 4, [
         Level(
             id="18-1",
             title="Đại chiến Vịt Vương",
@@ -1007,7 +1007,7 @@ WORLDS: list[World] = [
         ),
     ]),
     # ================================================================ GIAI ĐOẠN 4
-    World(19, 4, "Băng chuyền", "map, filter, zip, lambda", "Built-Ins · Python Functionals", 1, [
+    World(19, 4, "Băng chuyền", "map, filter, zip, lambda", "Lập trình hàm", 1, [
         Level(
             id="19-1",
             title="Máy lọc số",
@@ -1059,7 +1059,7 @@ WORLDS: list[World] = [
             kill_all=True,
         ),
     ]),
-    World(20, 4, "Mật thư", "Regex & XML", "Regex and Parsing · XML", 2, [
+    World(20, 4, "Mật thư", "Regex & XML", "Đọc và phân tích văn bản", 2, [
         Level(
             id="20-1",
             title="Bức thư bí ẩn",
@@ -1112,7 +1112,7 @@ WORLDS: list[World] = [
             },
         ),
     ]),
-    World(21, 4, "Bùa chú", "Closure & decorator", "Closures and Decorators", 3, [
+    World(21, 4, "Bùa chú", "Closure & decorator", "Closure và decorator", 3, [
         Level(
             id="21-1",
             title="Xưởng làm bùa",
@@ -1167,7 +1167,7 @@ WORLDS: list[World] = [
         ),
     ]),
     # ================================================================ GIAI ĐOẠN 5
-    World(22, 5, "Ma trận", "NumPy cơ bản", "NumPy", 4, [
+    World(22, 5, "Ma trận", "NumPy cơ bản", "Tính toán với NumPy", 4, [
         Level(
             id="22-1",
             title="Bảng điểm",
@@ -1210,7 +1210,7 @@ WORLDS: list[World] = [
             door_code=26,
         ),
     ]),
-    World(23, 5, "Thợ sửa lỗi", "Debugging", "Debugging", 5, [
+    World(23, 5, "Thợ sửa lỗi", "Debugging", "Gỡ lỗi", 5, [
         Level(
             id="23-1",
             title="Ba con bọ cú pháp",

@@ -441,7 +441,7 @@ class App:
         world = world_of(level.id)
         self.theory_view.build(
             title=f"Lý thuyết · {world.concept}",
-            tag=f"HackerRank · {world.hackerrank}  |  Giai đoạn {world.stage}",
+            tag=f"Kỹ năng: {world.skill}  |  Giai đoạn {world.stage}",
             theory=THEORY[level.id],
             rect=THEORY_RECT,
             inputs=level.extra_globals,
@@ -621,7 +621,7 @@ class App:
         title = self.font_title.render("OneSpace CodeQuest · Python", True, COLOR_ACCENT)
         self.screen.blit(title, (text_left, 34))
         subtitle = self.font.render(
-            "Chơi như CodeCombat - học theo lộ trình HackerRank Python. Dành cho học sinh THCS - THPT.",
+            "Viết code Python để đưa nhân vật vượt màn - 5 giai đoạn từ nền tảng tới nâng cao. Cho học sinh THCS - THPT.",
             True,
             COLOR_MUTED,
         )
@@ -636,7 +636,7 @@ class App:
         y = box.y + 10
         heading = self.font_bold.render(f"Giai đoạn {stage.number}: {stage.title}", True, COLOR_ACCENT)
         self.screen.blit(heading, (box.x + 16, y))
-        domains = self.font_small.render(f"HackerRank: {stage.subdomains}", True, COLOR_INFO)
+        domains = self.font_small.render(f"Kỹ năng: {stage.skills}", True, COLOR_INFO)
         self.screen.blit(domains, (box.x + 16 + heading.get_width() + 18, y + 4))
         y += 32
         for label, text in (("Nội dung", stage.content), ("Trọng tâm", stage.focus), ("Mốc", stage.milestone)):

@@ -571,7 +571,7 @@ THEORY.update({
             "List comprehension tạo list mới trong MỘT dòng: `[bieu_thuc for x in danh_sach]`.",
             "Thêm điều kiện để lọc: `[x for x in danh_sach if dieu_kien]` - chỉ giữ phần tử thoả điều kiện.",
             "So sánh với cách viết dài: tạo list rỗng, chạy for, dùng if, rồi append - comprehension làm gọn cả 4 bước đó.",
-            "Đây là kỹ năng rất hay gặp trong bài thi HackerRank.",
+            "Đây là kỹ năng rất hay gặp trong các bài thi và bài tập lập trình.",
         ],
         starter_notes=[
             ("gems = hero.find_gems()", "Lấy danh sách ngọc (mỗi viên là dict có \"color\")."),

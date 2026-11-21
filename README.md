@@ -2,14 +2,18 @@
 
 <p align="center"><img src="assets/onespace_logo.png" width="220" alt="OneSpace"></p>
 
-Game học lập trình Python cho học sinh **THCS – THPT**:
+Trò chơi học lập trình Python của OneSpace, dành cho học sinh **THCS – THPT**.
 
-- **Chơi như CodeCombat**: viết code Python để điều khiển hero đi, nhặt ngọc, đánh quái, mở cửa.
-- **Học như HackerRank**: 48 màn chia thành 5 giai đoạn theo lộ trình HackerRank Python.
-  Mỗi màn có phần **Lý thuyết**: khái niệm, đề bài, dữ liệu vào, giải thích code ban đầu,
-  ví dụ minh hoạ (khác lời giải) và lỗi hay gặp.
-- Không hiện lời giải; **Gợi ý** chỉ gợi hướng suy nghĩ.
-- Có sẵn **bộ gõ tiếng Việt Telex** (chỉ hoạt động trong dấu nháy và ghi chú).
+Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật để đưa nhân vật vượt bản đồ –
+đi đường, nhặt ngọc, hạ quái, giải mật mã mở cửa. Code chạy xong, nhân vật diễn lại từng bước
+để các em thấy ngay chương trình của mình đúng hay sai ở đâu.
+
+- **48 màn, 5 giai đoạn**: đi từ câu lệnh đầu tiên tới thư viện chuẩn, class, lập trình hàm, NumPy và gỡ lỗi.
+- **Lý thuyết đi kèm từng màn**: khái niệm, đề bài, dữ liệu có sẵn, giải thích từng dòng code ban đầu,
+  ví dụ minh hoạ (khác lời giải) và các lỗi hay gặp.
+- **Tự suy nghĩ**: game không hiện lời giải; nút Gợi ý chỉ gợi hướng.
+- **Thân thiện với học sinh Việt Nam**: lời giải thích bằng tiếng Việt, bộ gõ Telex có sẵn
+  (chỉ hoạt động trong dấu nháy và ghi chú nên không làm hỏng code).
 
 ## Tải game (Windows)
 
@@ -20,16 +24,16 @@ Nếu Windows hiện "Windows protected your PC": bấm **More info → Run anyw
 
 ## Lộ trình 5 giai đoạn
 
-| Giai đoạn | Chủ đề (HackerRank) | World | Số màn |
+| Giai đoạn | Các em học gì | World | Số màn |
 |---|---|---|---|
-| 1. Cú pháp & kiểu dữ liệu nền tảng | Introduction, Basic Data Types, Strings | 1–10: cú pháp, biến, if, vòng lặp, ép kiểu, hàm, chuỗi, list/tuple, dict/set, list comprehension | 23 |
-| 2. Thư viện chuẩn | Sets, Math, Itertools, Collections, Date and Time | 11–15 | 8 |
-| 3. OOP & ngoại lệ | Errors and Exceptions, Classes | 16–18 (try/except, class, `__init__`, `__add__`, `__str__`, `__iter__`, trùm giữa) | 7 |
-| 4. Lập trình hàm & nâng cao | Built-Ins, Functionals, Regex, XML, Closures, Decorators | 19–21 | 6 |
-| 5. NumPy & gỡ lỗi | NumPy, Debugging | 22–23 | 4 |
+| 1. Cú pháp & kiểu dữ liệu nền tảng | Câu lệnh, biến, `if`, vòng lặp, ép kiểu, hàm, xử lý chuỗi, list/tuple, dict/set, list comprehension, list lồng nhau | 1–10 | 23 |
+| 2. Thư viện chuẩn | Giao/hợp tập hợp, `math`, hoán vị – tổ hợp (`itertools`), `Counter`, `deque`, ngày giờ | 11–15 | 8 |
+| 3. Hướng đối tượng & xử lý lỗi | `try/except`, class, `__init__`, `__add__`, `__str__`, `__iter__`, màn trùm tổng hợp | 16–18 | 7 |
+| 4. Lập trình hàm & nâng cao | `map`, `filter`, `zip`, `lambda`, biểu thức chính quy, đọc XML, closure, decorator | 19–21 | 6 |
+| 5. NumPy & gỡ lỗi | Mảng và ma trận với NumPy, đọc thông báo lỗi, sửa lỗi cú pháp và lỗi logic | 22–23 | 4 |
 
-Xong 3 giai đoạn đầu ≈ kiến thức chứng chỉ HackerRank Python (Basic);
-giai đoạn 4 là trọng tâm Python (Intermediate).
+Xong 3 giai đoạn đầu, học sinh nắm chắc Python cơ bản; giai đoạn 4–5 đưa các em lên trình độ trung cấp
+và sẵn sàng học tiếp khoa học dữ liệu, AI hoặc giải thuật.
 
 ## Chạy từ mã nguồn
 
@@ -89,7 +93,7 @@ codequest/theory.py       Lý thuyết từng màn
 codequest/game.py         Giao diện: menu theo giai đoạn, bản đồ, phát lại hoạt ảnh, bảng tin
 codequest/editor.py       Trình soạn code (tô màu, tự thụt lề, undo, Telex)
 codequest/telex.py        Bộ gõ tiếng Việt Telex
-codequest/theory_view.py  Khung lý thuyết kiểu HackerRank
+codequest/theory_view.py  Khung lý thuyết cuộn được
 codequest/display.py      Co giãn khung hình theo cửa sổ
 codequest/assets.py       Nạp đồ hoạ và logo
 codequest/selftest.py     Tự kiểm tra mọi màn (cần lời giải riêng của giáo viên)

@@ -1019,7 +1019,7 @@ def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
 class Stage:
     number: int
     title: str
-    subdomains: str
+    skills: str
     content: str
     focus: str
     milestone: str
@@ -1031,7 +1031,7 @@ class WorldInfo:
     stage: int
     title: str
     concept: str
-    hackerrank: str
+    skill: str
     background: int
     levels: list[Level]
 
@@ -1040,7 +1040,7 @@ STAGES: list[Stage] = [
     Stage(
         1,
         "Cú pháp & kiểu dữ liệu nền tảng",
-        "Introduction · Basic Data Types · Strings",
+        "Nhập môn · Kiểu dữ liệu · Chuỗi",
         "Nhập/xuất, if-else, vòng lặp, hàm cơ bản, xử lý chuỗi (cắt, định dạng), list, tuple, dictionary.",
         "List Comprehension và list lồng nhau - viết code ngắn gọn thay cho nhiều vòng lặp lồng nhau.",
         "Nền móng cho mọi giai đoạn sau.",
@@ -1048,34 +1048,34 @@ STAGES: list[Stage] = [
     Stage(
         2,
         "Sức mạnh thư viện chuẩn",
-        "Sets · Math · Itertools · Collections · Date and Time",
+        "Tập hợp · Toán học · Hoán vị - tổ hợp · Cấu trúc dữ liệu · Ngày giờ",
         "Phép toán tập hợp (giao, hợp), hoán vị - tổ hợp với itertools, Counter / deque trong collections, ngày giờ.",
         "Dùng đúng set hoặc Counter để tra cứu nhanh thay vì duyệt list nhiều lần.",
-        "Giải bài thuật toán nhanh hơn hẳn.",
+        "Giải các bài toán đếm, tìm kiếm, sắp xếp nhanh và gọn hơn hẳn.",
     ),
     Stage(
         3,
         "Lập trình hướng đối tượng & ngoại lệ",
-        "Errors and Exceptions · Classes",
+        "Xử lý lỗi · Lập trình hướng đối tượng",
         "Bắt lỗi an toàn với try-except, thiết kế class, thuộc tính, magic methods (__str__, __add__, __iter__).",
         "Tự tạo kiểu dữ liệu của riêng mình và giữ chương trình không bị dừng khi gặp lỗi.",
-        "Xong 3 giai đoạn đầu: đủ kiến thức thi chứng chỉ HackerRank Python (Basic).",
+        "Xong 3 giai đoạn đầu: vững toàn bộ kiến thức Python cơ bản.",
     ),
     Stage(
         4,
         "Lập trình hàm & kỹ thuật nâng cao",
-        "Built-Ins · Python Functionals · Regex and Parsing · XML · Closures and Decorators",
+        "Hàm có sẵn · Lập trình hàm · Biểu thức chính quy · XML · Closure và decorator",
         "map, filter, zip, lambda, biểu thức chính quy (regex), đọc XML, closure và decorator.",
         "Viết hàm nhận hàm, trả về hàm - mở rộng logic mà không sửa code cũ.",
-        "Trọng tâm của chứng chỉ HackerRank Python (Intermediate).",
+        "Bước lên trình độ Python trung cấp.",
     ),
     Stage(
         5,
         "NumPy & gỡ lỗi thực chiến",
-        "NumPy · Debugging",
+        "Tính toán với NumPy · Gỡ lỗi",
         "Mảng nhiều chiều với NumPy, phép tính ma trận cơ bản, đọc hiểu và sửa lỗi trong code có sẵn.",
         "Rèn kỹ năng đọc thông báo lỗi và tìm lỗi logic.",
-        "Hướng tới huy hiệu 5 sao Python, rồi sang nhánh Problem Solving.",
+        "Sẵn sàng học tiếp khoa học dữ liệu, AI và giải thuật nâng cao.",
     ),
 ]
 
@@ -1113,7 +1113,7 @@ MAP_WEAPON_ROOM = [
 
 WORLDS: list[WorldInfo] = [
     # ================================================================ GIAI ĐOẠN 1
-    WorldInfo(1, 1, "Khởi hành", "Cú pháp cơ bản", "Introduction", 1, [
+    WorldInfo(1, 1, "Khởi hành", "Cú pháp cơ bản", "Nhập môn", 1, [
         Level(
             id="1-1",
             title="Bước chân đầu tiên",
@@ -1172,7 +1172,7 @@ WORLDS: list[WorldInfo] = [
             say_contains="Xin chào",
         ),
     ]),
-    WorldInfo(2, 1, "Kho đồ", "Biến và kiểu dữ liệu", "Basic Data Types", 2, [
+    WorldInfo(2, 1, "Kho đồ", "Biến và kiểu dữ liệu", "Kiểu dữ liệu", 2, [
         Level(
             id="2-1",
             title="Hộp chứa số bước",
@@ -1217,7 +1217,7 @@ WORLDS: list[WorldInfo] = [
             say_contains="30",
         ),
     ]),
-    WorldInfo(3, 1, "Ngã rẽ", "Câu lệnh điều kiện", "Introduction", 3, [
+    WorldInfo(3, 1, "Ngã rẽ", "Câu lệnh điều kiện", "Nhập môn", 3, [
         Level(
             id="3-1",
             title="Quái chặn đường",
@@ -1267,7 +1267,7 @@ WORLDS: list[WorldInfo] = [
             requires=["if"],
         ),
     ]),
-    WorldInfo(4, 1, "Vòng lặp", "for và while", "Introduction", 4, [
+    WorldInfo(4, 1, "Vòng lặp", "for và while", "Nhập môn", 4, [
         Level(
             id="4-1",
             title="Hàng ngọc",
@@ -1316,7 +1316,7 @@ WORLDS: list[WorldInfo] = [
             requires=["while"],
         ),
     ]),
-    WorldInfo(5, 1, "Biến hình", "Ép kiểu dữ liệu", "Basic Data Types", 5, [
+    WorldInfo(5, 1, "Biến hình", "Ép kiểu dữ liệu", "Kiểu dữ liệu", 5, [
         Level(
             id="5-1",
             title="Mật mã chuỗi",
@@ -1360,7 +1360,7 @@ WORLDS: list[WorldInfo] = [
             door_code=42,
         ),
     ]),
-    WorldInfo(6, 1, "Phép thuật", "Hàm và hàm có sẵn", "Introduction", 1, [
+    WorldInfo(6, 1, "Phép thuật", "Hàm và hàm có sẵn", "Nhập môn", 1, [
         Level(
             id="6-1",
             title="Chiêu nhảy gai",
@@ -1424,7 +1424,7 @@ WORLDS: list[WorldInfo] = [
             door_code=42,
         ),
     ]),
-    WorldInfo(7, 1, "Cuộn giấy", "Xử lý chuỗi", "Strings", 2, [
+    WorldInfo(7, 1, "Cuộn giấy", "Xử lý chuỗi", "Chuỗi", 2, [
         Level(
             id="7-1",
             title="Cắt chữ",
@@ -1475,7 +1475,7 @@ WORLDS: list[WorldInfo] = [
             say_contains="MÈO có 3 ngọc",
         ),
     ]),
-    WorldInfo(8, 1, "Ba lô", "List và tuple", "Basic Data Types", 2, [
+    WorldInfo(8, 1, "Ba lô", "List và tuple", "Kiểu dữ liệu", 2, [
         Level(
             id="8-1",
             title="Bản đồ kho báu",
@@ -1523,7 +1523,7 @@ WORLDS: list[WorldInfo] = [
             kill_all=True,
         ),
     ]),
-    WorldInfo(9, 1, "Sổ tay", "Dictionary và set", "Basic Data Types", 3, [
+    WorldInfo(9, 1, "Sổ tay", "Dictionary và set", "Kiểu dữ liệu", 3, [
         Level(
             id="9-1",
             title="Điểm yếu",
@@ -1565,7 +1565,7 @@ WORLDS: list[WorldInfo] = [
             say_contains="3",
         ),
     ]),
-    WorldInfo(10, 1, "Đội hình", "List comprehension & list lồng nhau", "Basic Data Types", 4, [
+    WorldInfo(10, 1, "Đội hình", "List comprehension & list lồng nhau", "Kiểu dữ liệu", 4, [
         Level(
             id="10-1",
             title="Lọc ngọc xanh",
@@ -1622,7 +1622,7 @@ WORLDS: list[WorldInfo] = [
         ),
     ]),
     # ================================================================ GIAI ĐOẠN 2
-    WorldInfo(11, 2, "Tập hợp", "Giao, hợp tập hợp", "Sets", 5, [
+    WorldInfo(11, 2, "Tập hợp", "Giao, hợp tập hợp", "Tập hợp", 5, [
         Level(
             id="11-1",
             title="Hai trinh sát",
@@ -1651,7 +1651,7 @@ WORLDS: list[WorldInfo] = [
             say_contains="4",
         ),
     ]),
-    WorldInfo(12, 2, "Toán học", "Thư viện math", "Math", 6, [
+    WorldInfo(12, 2, "Toán học", "Thư viện math", "Toán học", 6, [
         Level(
             id="12-1",
             title="Chiếc thang",
@@ -1691,7 +1691,7 @@ WORLDS: list[WorldInfo] = [
             door_code=12,
         ),
     ]),
-    WorldInfo(13, 2, "Hoán vị", "itertools", "Itertools", 1, [
+    WorldInfo(13, 2, "Hoán vị", "itertools", "Hoán vị - tổ hợp", 1, [
         Level(
             id="13-1",
             title="Khoá ba rune",
@@ -1738,7 +1738,7 @@ WORLDS: list[WorldInfo] = [
             door_code=96,
         ),
     ]),
-    WorldInfo(14, 2, "Kho quân", "collections", "Collections", 2, [
+    WorldInfo(14, 2, "Kho quân", "collections", "Cấu trúc dữ liệu", 2, [
         Level(
             id="14-1",
             title="Điểm danh quân địch",
@@ -1790,7 +1790,7 @@ WORLDS: list[WorldInfo] = [
             door_code="Dũng",
         ),
     ]),
-    WorldInfo(15, 2, "Lịch", "Ngày và giờ", "Date and Time", 3, [
+    WorldInfo(15, 2, "Lịch", "Ngày và giờ", "Ngày giờ", 3, [
         Level(
             id="15-1",
             title="Đếm ngày tới hội trại",
@@ -1813,7 +1813,7 @@ WORLDS: list[WorldInfo] = [
         ),
     ]),
     # ================================================================ GIAI ĐOẠN 3
-    WorldInfo(16, 3, "Bẫy", "Xử lý ngoại lệ", "Errors and Exceptions", 6, [
+    WorldInfo(16, 3, "Bẫy", "Xử lý ngoại lệ", "Xử lý lỗi", 6, [
         Level(
             id="16-1",
             title="Cửa kẹt",
@@ -1884,7 +1884,7 @@ WORLDS: list[WorldInfo] = [
             door_code=42,
         ),
     ]),
-    WorldInfo(17, 3, "Xưởng class", "Class & magic methods", "Classes", 5, [
+    WorldInfo(17, 3, "Xưởng class", "Class & magic methods", "Lập trình hướng đối tượng", 5, [
         Level(
             id="17-1",
             title="Bình thuốc hồi máu",
@@ -1969,7 +1969,7 @@ WORLDS: list[WorldInfo] = [
             requires=["dunder:__iter__", "call:follow"],
         ),
     ]),
-    WorldInfo(18, 3, "Trùm giữa", "Tổng hợp giai đoạn 1-3", "Kiểm tra Python (Basic)", 4, [
+    WorldInfo(18, 3, "Trùm giữa", "Tổng hợp giai đoạn 1-3", "Ôn tập Python cơ bản", 4, [
         Level(
             id="18-1",
             title="Đại chiến Vịt Vương",
@@ -2005,7 +2005,7 @@ WORLDS: list[WorldInfo] = [
         ),
     ]),
     # ================================================================ GIAI ĐOẠN 4
-    WorldInfo(19, 4, "Băng chuyền", "map, filter, zip, lambda", "Built-Ins · Python Functionals", 1, [
+    WorldInfo(19, 4, "Băng chuyền", "map, filter, zip, lambda", "Lập trình hàm", 1, [
         Level(
             id="19-1",
             title="Máy lọc số",
@@ -2057,7 +2057,7 @@ WORLDS: list[WorldInfo] = [
             kill_all=True,
         ),
     ]),
-    WorldInfo(20, 4, "Mật thư", "Regex & XML", "Regex and Parsing · XML", 2, [
+    WorldInfo(20, 4, "Mật thư", "Regex & XML", "Đọc và phân tích văn bản", 2, [
         Level(
             id="20-1",
             title="Bức thư bí ẩn",
@@ -2110,7 +2110,7 @@ WORLDS: list[WorldInfo] = [
             },
         ),
     ]),
-    WorldInfo(21, 4, "Bùa chú", "Closure & decorator", "Closures and Decorators", 3, [
+    WorldInfo(21, 4, "Bùa chú", "Closure & decorator", "Closure và decorator", 3, [
         Level(
             id="21-1",
             title="Xưởng làm bùa",
@@ -2165,7 +2165,7 @@ WORLDS: list[WorldInfo] = [
         ),
     ]),
     # ================================================================ GIAI ĐOẠN 5
-    WorldInfo(22, 5, "Ma trận", "NumPy cơ bản", "NumPy", 4, [
+    WorldInfo(22, 5, "Ma trận", "NumPy cơ bản", "Tính toán với NumPy", 4, [
         Level(
             id="22-1",
             title="Bảng điểm",
@@ -2208,7 +2208,7 @@ WORLDS: list[WorldInfo] = [
             door_code=26,
         ),
     ]),
-    WorldInfo(23, 5, "Thợ sửa lỗi", "Debugging", "Debugging", 5, [
+    WorldInfo(23, 5, "Thợ sửa lỗi", "Debugging", "Gỡ lỗi", 5, [
         Level(
             id="23-1",
             title="Ba con bọ cú pháp",
@@ -2842,7 +2842,7 @@ THEORY.update({
             "List comprehension tạo list mới trong MỘT dòng: `[bieu_thuc for x in danh_sach]`.",
             "Thêm điều kiện để lọc: `[x for x in danh_sach if dieu_kien]` - chỉ giữ phần tử thoả điều kiện.",
             "So sánh với cách viết dài: tạo list rỗng, chạy for, dùng if, rồi append - comprehension làm gọn cả 4 bước đó.",
-            "Đây là kỹ năng rất hay gặp trong bài thi HackerRank.",
+            "Đây là kỹ năng rất hay gặp trong các bài thi và bài tập lập trình.",
         ],
         starter_notes=[
             ("gems = hero.find_gems()", "Lấy danh sách ngọc (mỗi viên là dict có \"color\")."),
@@ -4551,7 +4551,7 @@ class App:
         world = world_of(level.id)
         self.theory_view.build(
             title=f"Lý thuyết · {world.concept}",
-            tag=f"HackerRank · {world.hackerrank}  |  Giai đoạn {world.stage}",
+            tag=f"Kỹ năng: {world.skill}  |  Giai đoạn {world.stage}",
             theory=THEORY[level.id],
             rect=THEORY_RECT,
             inputs=level.extra_globals,
@@ -4731,7 +4731,7 @@ class App:
         title = self.font_title.render("OneSpace CodeQuest · Python", True, COLOR_ACCENT)
         self.screen.blit(title, (text_left, 34))
         subtitle = self.font.render(
-            "Chơi như CodeCombat - học theo lộ trình HackerRank Python. Dành cho học sinh THCS - THPT.",
+            "Viết code Python để đưa nhân vật vượt màn - 5 giai đoạn từ nền tảng tới nâng cao. Cho học sinh THCS - THPT.",
             True,
             COLOR_MUTED,
         )
@@ -4746,7 +4746,7 @@ class App:
         y = box.y + 10
         heading = self.font_bold.render(f"Giai đoạn {stage.number}: {stage.title}", True, COLOR_ACCENT)
         self.screen.blit(heading, (box.x + 16, y))
-        domains = self.font_small.render(f"HackerRank: {stage.subdomains}", True, COLOR_INFO)
+        domains = self.font_small.render(f"Kỹ năng: {stage.skills}", True, COLOR_INFO)
         self.screen.blit(domains, (box.x + 16 + heading.get_width() + 18, y + 4))
         y += 32
         for label, text in (("Nội dung", stage.content), ("Trọng tâm", stage.focus), ("Mốc", stage.milestone)):

@@ -43,8 +43,8 @@ KIT_FOLDERS_USED = [
 GUIDE = f"""ONESPACE CODEQUEST - HỌC PYTHON QUA TRÒ CHƠI (v{__version__})
 ==============================================================
 
-Chơi như CodeCombat: viết code Python để điều khiển hero.
-Học theo lộ trình HackerRank Python: 5 giai đoạn, 48 màn.
+Trò chơi học lập trình: viết code Python để đưa nhân vật vượt màn.
+48 màn chia 5 giai đoạn, từ câu lệnh đầu tiên tới NumPy và gỡ lỗi.
 Dành cho học sinh THCS - THPT.
 
 CÁCH MỞ GAME
