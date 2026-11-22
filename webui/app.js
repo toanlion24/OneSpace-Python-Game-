@@ -227,6 +227,7 @@ function renderMenu() {
           </div>
           <div class="spacer"></div>
           <div class="tool-row">
+            <button class="button small" data-action="handbook">${ICONS.book}<span class="label-text">Sổ tay</span></button>
             <button class="button small" data-action="shop">${ICONS.shop}<span class="label-text">Cửa hàng &amp; Huy hiệu</span></button>
             <button class="button small" data-action="music">${state.data.settings.musicVolume ? ICONS.music : ICONS.mute}<span class="label-text">${musicLabel()}</span></button>
             <button class="button small" data-action="backup" title="Lưu bản sao tiến độ vào Documents">${ICONS.save}<span class="label-text">Sao lưu</span></button>
@@ -275,7 +276,8 @@ function renderMenu() {
   });
   bindClicks(appRoot, "[data-action]", (element) => {
     const action = element.dataset.action;
-    if (action === "shop") showCollection();
+    if (action === "handbook") openHandbook();
+    else if (action === "shop") showCollection();
     else if (action === "heroes") showHeroes(false);
     else if (action === "music") openMusicPanel();
     else if (action === "backup") backupProgress();
@@ -645,8 +647,9 @@ function renderPlay(level) {
             <span class="star-goal ${index < level.bestStars ? "on" : ""}">${starIcons(index < level.bestStars ? 1 : 0, 1)}<span class="text">${escapeHtml(goal)}</span></span>`).join("")}
         </div>
         <span class="chip gold" id="coins">${ICONS.coin} ${state.data.player.coins}</span>
+        <button class="button" id="handbook-open" title="Sổ tay lý thuyết của cả game">${ICONS.book} Sổ tay</button>
         <button class="button icon" id="music" title="Nhạc nền">${state.data.settings.musicVolume ? ICONS.music : ICONS.mute}</button>
-        <button class="button" id="theory-toggle">${ICONS.book} Lý thuyết</button>
+        <button class="button" id="theory-toggle">${ICONS.bulb} Lý thuyết màn</button>
       </header>
 
       <div class="play-body">
@@ -720,6 +723,7 @@ function renderPlay(level) {
   document.getElementById("speed").addEventListener("click", toggleSpeed);
   document.getElementById("skip").addEventListener("click", () => state.map?.skip());
   document.getElementById("music").addEventListener("click", openMusicPanel);
+  document.getElementById("handbook-open").addEventListener("click", () => openHandbook(level.world.number));
   document.getElementById("theory-toggle").addEventListener("click", () => setTheoryOpen(!isTheoryOpen()));
   bindTheory();
   setTheoryOpen(!level.completed);

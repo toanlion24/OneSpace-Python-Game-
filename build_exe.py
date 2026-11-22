@@ -61,6 +61,8 @@ CÁCH CHƠI
   (nhả chuột là tự chép), nhấn 3 lần để chép cả đoạn, hoặc bấm nút Sao chép.
 - Bấm Chạy (hoặc Ctrl+Enter) để hero làm theo code của bạn.
 - Gợi ý: gợi hướng suy nghĩ khi bị bí.
+- Sổ tay: nút "Sổ tay" ở menu và trong màn chơi mở cuốn sổ tay lý thuyết của cả game
+  (tìm kiếm gõ không dấu được, có từ điển thuật ngữ, bảng tra lệnh, nút In / Lưu PDF).
 - Bản đồ kiểm tra ẩn: nhiều màn thử code của bạn trên một bản đồ dài hơn hoặc dữ liệu khác.
   Đừng đếm ô hay gõ thẳng đáp án - hãy viết code tính từ bản đồ và từ biến.
 - Gõ tiếng Việt: dùng Unikey / EVKey / bộ gõ của Windows như bình thường.

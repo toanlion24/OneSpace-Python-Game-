@@ -27,7 +27,7 @@ from .web_api import WebApi
 SERVED_FOLDERS = ("webui", "gamekit", "assets")
 API_METHODS = (
     "bootstrap", "level", "save_code", "run", "collection", "choose_hero", "buy_item", "finish_hero_pick",
-    "save_settings", "backup", "restore", "completions", "music",
+    "save_settings", "backup", "restore", "completions", "music", "handbook",
 )
 TOKEN_HEADER = "X-Game-Token"
 MAX_REQUEST_BYTES = 200_000

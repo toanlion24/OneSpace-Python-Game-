@@ -108,6 +108,19 @@ def test_completions_include_hero_methods(api):
     assert "math" in data["modules"]
 
 
+def test_handbook_covers_every_level_without_starter_code(api):
+    data = api.handbook()
+    level_ids = [level["id"] for world in data["worlds"] for level in world["levels"]]
+    assert sorted(level_ids) == sorted(LEVELS_BY_ID)
+    assert all(world["lesson"] for world in data["worlds"])
+    assert len(data["glossary"]) > 80
+    text = json.dumps(data, ensure_ascii=False)
+    assert "starter" not in text
+    for level in LEVELS_BY_ID.values():
+        if len(level.starter.strip()) > 40:
+            assert level.starter.strip() not in text
+
+
 def test_music_returns_wav(api, monkeypatch):
     def tiny_track(_spec):
         return np.zeros((2205, 2), dtype=np.int16)

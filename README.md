@@ -14,6 +14,8 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
   đời thường, mẫu câu lệnh, chạy thử từng dòng, mẹo nhớ), ví dụ minh hoạ (khác lời giải) và các lỗi hay gặp.
 - **Chép được lý thuyết**: kéo chuột bôi đen là tự chép, nhấn đúp chọn một từ, nhấn 3 lần chép cả đoạn;
   Ctrl+C / Ctrl+A, hoặc nút Sao chép (chưa chọn thì chép cả bài).
+- **Sổ tay lý thuyết**: tra cứu toàn bộ kiến thức 23 World, từ điển thuật ngữ và bảng tra lệnh ở một chỗ;
+  tìm kiếm gõ không dấu được, in hoặc lưu PDF thành cuốn sổ giấy.
 - **Tự suy nghĩ**: game không hiện lời giải; nút Gợi ý chỉ gợi hướng.
 - **Bản đồ kiểm tra ẩn**: nhiều màn chạy thêm code trên bản đồ dài hơn hoặc dữ liệu khác;
   code "gõ cứng" (đếm ô, gõ thẳng đáp án) sẽ bị phát hiện, và game diễn lại bản đồ ẩn để em thấy sai ở đâu.

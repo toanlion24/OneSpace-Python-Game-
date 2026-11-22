@@ -581,6 +581,80 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px;
 .track.selected { border-color: rgba(124, 92, 255, 0.8); background: rgba(124, 92, 255, 0.28); }
 .track.playing b::after { content: " ♪"; color: var(--green); }
 
+/* ------------------------------------------------------------ handbook */
+.handbook {
+  position: fixed; inset: 0; z-index: 40;
+  display: grid; grid-template-columns: 300px minmax(0, 1fr);
+  background: #080b1a;
+  animation: fade 0.18s ease;
+}
+.hb-side { display: flex; flex-direction: column; min-height: 0; padding: 20px 14px 14px; border-right: 1px solid var(--border); background: rgba(16, 21, 46, 0.9); }
+.hb-brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 16px; }
+.hb-brand svg { width: 30px; height: 30px; color: var(--accent-2); }
+.hb-brand b { display: block; font-family: var(--font-display); font-size: 19px; }
+.hb-brand span { color: var(--muted); font-size: 12px; }
+.hb-search { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border-strong); }
+.hb-search:focus-within { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.18); }
+.hb-search svg { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.hb-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; }
+.hb-nav { flex: 1; overflow-y: auto; margin-top: 14px; display: flex; flex-direction: column; gap: 2px; }
+.hb-nav button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 7px 10px; border-radius: 9px; color: #c9d0ee; font-size: 14px; }
+.hb-nav button span { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 7px; background: rgba(255, 255, 255, 0.06); font-size: 12px; font-weight: 700; color: var(--muted); }
+.hb-nav button:hover { background: rgba(124, 92, 255, 0.18); color: #fff; }
+.hb-nav button.active { background: rgba(124, 92, 255, 0.32); color: #fff; }
+.hb-stage { margin: 14px 10px 4px; font-size: 11.5px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; color: var(--stage-color); }
+.hb-main { display: flex; flex-direction: column; min-height: 0; }
+.hb-head { display: flex; align-items: center; gap: 10px; padding: 14px 24px; border-bottom: 1px solid var(--border); }
+.hb-head .spacer { flex: 1; }
+.hb-result { color: var(--muted); font-weight: 600; }
+.hb-content { flex: 1; overflow-y: auto; padding: 8px 48px 80px; user-select: text; scroll-behavior: smooth; }
+.hb-content > * { max-width: 920px; margin-left: auto; margin-right: auto; }
+.hb-chapter { padding: 26px 0 10px; border-bottom: 1px solid var(--border); scroll-margin-top: 8px; }
+.hb-chapter h1 { font-family: var(--font-display); font-size: 34px; margin: 0 0 10px; }
+.hb-chapter h2 { font-family: var(--font-display); font-size: 24px; margin: 0 0 14px; color: var(--section-color); }
+.hb-chapter h3 { font-size: 17px; }
+.hb-chapter-head { display: flex; align-items: center; gap: 16px; margin-bottom: 6px; }
+.hb-chapter-head h2 { margin: 2px 0; }
+.hb-number { width: 56px; height: 56px; flex: none; display: grid; place-items: center; border-radius: 16px; font-family: var(--font-display); font-weight: 800; font-size: 24px; color: var(--section-color); border: 2px solid var(--section-color); box-shadow: 0 0 18px color-mix(in srgb, var(--section-color) 35%, transparent); }
+.hb-skill { color: var(--muted); font-size: 13.5px; }
+.hb-group { margin-top: 18px; }
+.hb-level h3 { color: var(--text); }
+.hb-level h3::before { display: none; }
+.hb-level-id { display: inline-grid; place-items: center; min-width: 40px; height: 26px; padding: 0 8px; margin-right: 10px; border-radius: 8px; font-size: 13px; font-weight: 800; color: #0b1020; background: var(--section-color); }
+.hb-warning { --section-color: var(--red); }
+.hb-intro p { color: #cdd4f2; font-size: 15.5px; }
+.hb-terms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hb-commands { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; }
+.hb-command { display: flex; flex-direction: column; padding: 8px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.035); border: 1px solid var(--border); }
+.hb-command code { color: #a7f3d0; font-size: 14px; }
+.hb-command span { color: var(--muted); font-size: 13px; }
+.hb-hidden, .hb-hidden-group { display: none !important; }
+.hb-empty { text-align: center; color: var(--muted); padding: 60px 0; font-size: 16px; }
+.handbook mark { background: rgba(255, 201, 74, 0.85); color: #1a1200; border-radius: 3px; padding: 0 1px; }
+
+@media print {
+  @page { margin: 16mm 14mm; }
+  html, body { height: auto; overflow: visible; background: #fff !important; color: #111; }
+  body > *:not(.handbook) { display: none !important; }
+  .starfield, .hb-side, .hb-head, .copy-button { display: none !important; }
+  .handbook { position: static; display: block; background: #fff; animation: none; }
+  .hb-main, .hb-content { display: block; overflow: visible; padding: 0; }
+  .hb-content > * { max-width: none; }
+  .hb-chapter { break-before: page; border: 0; padding-top: 0; }
+  .hb-intro { break-before: auto; }
+  .hb-chapter h1, .hb-chapter h2, .section h3, .section h4 { color: #111 !important; }
+  .hb-number { color: #111; border-color: #888; box-shadow: none; }
+  .hb-skill, .hb-intro p, .term, .hb-command span, .code-pair .note, li { color: #222 !important; }
+  .card, .term, .hb-command { background: #f7f7fb !important; border-color: #ccc !important; }
+  .code-pair { background: #f4f5fa !important; border-color: #ccc !important; break-inside: avoid; }
+  .code-pair pre { color: #111; white-space: pre-wrap; }
+  .tok-keyword { color: #7c3aed; } .tok-string { color: #15803d; } .tok-number { color: #c2410c; }
+  .tok-comment { color: #6b7280; } .tok-hero { color: #b45309; } .tok-method { color: #0369a1; } .tok-builtin { color: #1d4ed8; }
+  .inline-code, .hb-command code { color: #0f5132; background: #eef6f1; border-color: #cde3d6; }
+  .term b { color: #7a3f00; }
+  .hb-level-id { color: #fff; }
+}
+
 /* ------------------------------------------------------------ confetti */
 .confetti-layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
 .confetti { position: absolute; top: -12px; width: 9px; height: 14px; border-radius: 2px; animation: confetti-fall linear forwards; }

@@ -25,7 +25,7 @@ from .completion import (
     Suggestion,
 )
 from .engine import Level, RunResult, hero_hp_limits, run_code
-from .glossary import find_terms, theory_text
+from .glossary import GLOSSARY, find_terms, theory_text
 from .heroes import HEROES, HEROES_BY_NUMBER, color_map
 from .lessons import lesson_for_world
 from .levels import STAGES, WORLDS, all_levels, world_of
@@ -145,6 +145,50 @@ def completion_data() -> dict[str, Any]:
         "methods": _suggestion_data(COMMON_METHODS),
         "importable": IMPORTABLE,
         "maxSuggestions": MAX_SUGGESTIONS,
+    }
+
+
+def _handbook_world(world: Any) -> dict[str, Any]:
+    lesson = lesson_for_world(world.number)
+    lesson_data = None
+    if lesson is not None:
+        lesson_data = {
+            "analogy": lesson.analogy,
+            "syntax": [list(pair) for pair in lesson.syntax],
+            "walkthrough": [list(pair) for pair in lesson.walkthrough],
+            "tips": lesson.tips,
+        }
+    levels = []
+    for level in world.levels:
+        theory = THEORY[level.id]
+        levels.append({
+            "id": level.id,
+            "title": level.title,
+            "concept": theory.concept,
+            "example": [list(pair) for pair in theory.example],
+            "mistakes": theory.mistakes,
+        })
+    return {
+        "number": world.number,
+        "stage": world.stage,
+        "title": world.title,
+        "concept": world.concept,
+        "skill": world.skill,
+        "lesson": lesson_data,
+        "levels": levels,
+    }
+
+
+def handbook_data() -> dict[str, Any]:
+    """Nội dung sổ tay. Chỉ gồm lý thuyết và ví dụ (vốn khác lời giải) - không có đề bài hay code ban đầu."""
+    return {
+        "stages": [{"number": stage.number, "title": stage.title, "skills": stage.skills} for stage in STAGES],
+        "worlds": [_handbook_world(world) for world in WORLDS],
+        "glossary": sorted(
+            ({"term": glossary_term.term, "meaning": glossary_term.meaning} for glossary_term in GLOSSARY),
+            key=lambda entry: entry["term"].casefold(),
+        ),
+        "commands": completion_data(),
     }
 
 
@@ -347,6 +391,10 @@ class WebApi:
 
     def completions(self) -> dict[str, Any]:
         return completion_data()
+
+    def handbook(self) -> dict[str, Any]:
+        """Sổ tay lý thuyết: toàn bộ bài học theo World, từ điển thuật ngữ và bảng tra lệnh."""
+        return handbook_data()
 
     def music(self, index: int) -> bytes:
         """File WAV của một bài nhạc (tổng hợp lần đầu mất vài giây, sau đó dùng lại)."""
