@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .engine import Level, RunResult
+from .heroes import HEROES
 from .par import PAR
 
 STAR_COINS = 10
@@ -43,15 +44,18 @@ class ShopItem:
     requires: str | None = None
 
 
-SHOP_ITEMS: list[ShopItem] = [
-    ShopItem("skin1", "Bạn Nhỏ", "Nhân vật mặc định.", 0, "skin", skin_number=1),
-    ShopItem("skin2", "Rô-bốt Vàng", "Nhân vật rô-bốt tinh nghịch.", 120, "skin", skin_number=2),
-    ShopItem("skin3", "Cáo Lửa", "Nhân vật cáo nhanh nhẹn.", 220, "skin", skin_number=3),
+SKIN_ITEMS: list[ShopItem] = [
+    ShopItem(hero.item_id, hero.name, hero.description, hero.price, "skin", skin_number=hero.number)
+    for hero in HEROES
+]
+UPGRADE_ITEMS: list[ShopItem] = [
     ShopItem("heart1", "Tim thêm I", "+1 máu tối đa ở các màn thường.", 150, "heart"),
     ShopItem("heart2", "Tim thêm II", "+1 máu tối đa nữa (cần Tim thêm I).", 300, "heart", requires="heart1"),
     ShopItem("shield", "Khiên gỗ", "Đỡ giúp đòn đầu tiên trong mỗi màn thường.", 250, "shield"),
 ]
-ITEMS_BY_ID: dict[str, ShopItem] = {item.id: item for item in SHOP_ITEMS}
+# Cửa hàng chỉ bán nhân vật hiếm và vật phẩm; nhân vật miễn phí chọn ở màn Chọn nhân vật.
+SHOP_ITEMS: list[ShopItem] = [item for item in SKIN_ITEMS if item.price] + UPGRADE_ITEMS
+ITEMS_BY_ID: dict[str, ShopItem] = {item.id: item for item in [*SKIN_ITEMS, *UPGRADE_ITEMS]}
 
 
 @dataclass
@@ -132,7 +136,7 @@ def apply_win(progress: object, level: Level, world_levels: list[Level], world_n
 # ---------------------------------------------------------------- shop
 def bonus_hp(progress: object) -> int:
     owned: set[str] = progress.owned  # type: ignore[attr-defined]
-    return sum(1 for item_id in owned if ITEMS_BY_ID.get(item_id, SHOP_ITEMS[0]).kind == "heart")
+    return sum(1 for item_id in owned if item_id in ITEMS_BY_ID and ITEMS_BY_ID[item_id].kind == "heart")
 
 
 def has_shield(progress: object) -> bool:
@@ -172,5 +176,5 @@ def equip_skin(progress: object, item_id: str) -> bool:
 
 
 def skin_number(progress: object) -> int:
-    item = ITEMS_BY_ID.get(getattr(progress, "skin", DEFAULT_SKIN), SHOP_ITEMS[0])
+    item = ITEMS_BY_ID.get(getattr(progress, "skin", DEFAULT_SKIN), SKIN_ITEMS[0])
     return item.skin_number

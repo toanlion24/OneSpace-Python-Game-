@@ -14,7 +14,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
+# Giá nhân vật ở bản 1.3 - 1.4 (nay miễn phí, xu được trả lại khi mở tiến độ cũ).
+OLD_SKIN_PRICES: dict[str, int] = {"skin2": 120, "skin3": 220}
 # Xu thưởng cho mỗi sao (giữ giống rewards.STAR_COINS).
 STAR_COINS = 10
 BACKUP_NAME = "tien-do.json"
@@ -37,6 +39,14 @@ def _write_atomic(path: Path, text: str) -> None:
     os.replace(temporary, path)
 
 
+def _skin_refund(data: dict[str, Any]) -> int:
+    """Nhân vật từng phải mua (trước bản 1.5) nay miễn phí: trả lại số xu đã tiêu."""
+    if int(data.get("format", 1) or 1) >= 3:
+        return 0
+    owned = {str(item) for item in data.get("owned", [])}
+    return sum(price for item_id, price in OLD_SKIN_PRICES.items() if item_id in owned)
+
+
 class Progress:
     def __init__(self, main_file: Path, backup_dir: Path | None = None) -> None:
         self.main_file = main_file
@@ -50,6 +60,7 @@ class Progress:
         self.chests: set[int] = set()
         self.loot: dict[str, int] = {}
         self.muted = False
+        self.hero_picked = False
         self.restored_from_backup = False
         self._load()
 
@@ -79,7 +90,7 @@ class Progress:
             if isinstance(count, int):
                 self.stars[str(level_id)] = max(self.stars.get(str(level_id), 0), min(3, count))
         if isinstance(data.get("coins"), int):
-            self.coins = max(self.coins, data["coins"])
+            self.coins = max(self.coins, data["coins"] + _skin_refund(data))
         self.owned |= {str(item) for item in data.get("owned", [])}
         self.chests |= {int(world) for world in data.get("chests", []) if str(world).isdigit()}
         if self.skin == "skin1" and isinstance(data.get("skin"), str):
@@ -89,6 +100,8 @@ class Progress:
                 self.loot[str(level_id)] = max(self.loot.get(str(level_id), 0), count)
         if isinstance(data.get("muted"), bool):
             self.muted = data["muted"]
+        if data.get("hero_picked") is True:
+            self.hero_picked = True
         self._migrate_old_wins()
         return len(self.completed) - before
 
@@ -114,6 +127,7 @@ class Progress:
             "chests": sorted(self.chests),
             "loot": self.loot,
             "muted": self.muted,
+            "hero_picked": self.hero_picked,
         }
         return json.dumps(data, ensure_ascii=False, indent=2)
 

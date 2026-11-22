@@ -23,6 +23,8 @@ MODULE_ORDER = [
     "levels",
     "theory",
     "theory_practice",
+    "heroes",
+    "themes",
     "rewards",
     "display",
     "completion",
@@ -33,6 +35,7 @@ MODULE_ORDER = [
     "sound",
     "progress",
     "store_view",
+    "hero_view",
     "game",
 ]
 
@@ -42,6 +45,7 @@ RENAMES: dict[str, dict[str, str]] = {
     "editor": {r"COLOR_(\w+)": r"CODE_COLOR_\1"},
     "theory_view": {r"COLOR_(\w+)": r"THEORY_COLOR_\1"},
     "store_view": {r"COLOR_(\w+)": r"STORE_COLOR_\1"},
+    "hero_view": {r"COLOR_(\w+)": r"HERO_COLOR_\1", "PANEL": "HERO_PANEL"},
 }
 
 SOURCE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {

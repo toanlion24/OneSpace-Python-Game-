@@ -86,12 +86,20 @@ def test_shop_rules(tmp_path):
 def test_skins_buy_and_equip(tmp_path):
     progress = fresh_progress(tmp_path)
     assert rewards.skin_number(progress) == 1
-    assert not rewards.equip_skin(progress, "skin2")
-    progress.coins = 500
-    assert rewards.buy(progress, rewards.ITEMS_BY_ID["skin2"])
+    assert rewards.equip_skin(progress, "skin2")
     assert rewards.skin_number(progress) == 2
+    assert not rewards.equip_skin(progress, "skin13")
+    progress.coins = 500
+    assert rewards.buy(progress, rewards.ITEMS_BY_ID["skin13"])
+    assert rewards.skin_number(progress) == 13
     assert rewards.equip_skin(progress, "skin1")
     assert rewards.skin_number(progress) == 1
+
+
+def test_shop_sells_only_rare_heroes_and_upgrades():
+    skins = [item for item in rewards.SHOP_ITEMS if item.kind == "skin"]
+    assert skins and all(item.price > 0 for item in skins)
+    assert len(rewards.SHOP_ITEMS) * 92 + 130 <= 710
 
 
 def test_upgrades_give_extra_hearts_and_shield():

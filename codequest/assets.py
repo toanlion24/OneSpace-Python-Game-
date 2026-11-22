@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pygame
 
+from .heroes import HEROES, HEROES_BY_NUMBER, color_map
+from .themes import MapTheme
+
 IS_PACKAGED = getattr(sys, "frozen", False)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Khi đóng gói bằng PyInstaller, dữ liệu nằm trong thư mục giải nén tạm (sys._MEIPASS).
@@ -98,6 +101,26 @@ def slice_strip(sheet: pygame.Surface, frame_width: int, scale: float) -> list[p
     return frames
 
 
+def recolored(sheet: pygame.Surface, replacements: dict[tuple[int, int, int], tuple[int, int, int]]) -> pygame.Surface:
+    if not replacements:
+        return sheet
+    result = sheet.copy()
+    pixels = pygame.PixelArray(result)
+    for old_color, new_color in replacements.items():
+        pixels.replace(old_color, new_color)
+    pixels.close()
+    return result
+
+
+def tinted(tile: pygame.Surface, multiply: tuple[int, int, int], add: tuple[int, int, int]) -> pygame.Surface:
+    result = tile.copy()
+    if multiply != (255, 255, 255):
+        result.fill(multiply, special_flags=pygame.BLEND_RGB_MULT)
+    if add != (0, 0, 0):
+        result.fill(add, special_flags=pygame.BLEND_RGB_ADD)
+    return result
+
+
 def strip(relative_path: str, frame_width: int, scale: float) -> list[pygame.Surface]:
     return slice_strip(load_image(relative_path), frame_width, scale)
 
@@ -105,6 +128,8 @@ def strip(relative_path: str, frame_width: int, scale: float) -> list[pygame.Sur
 class Assets:
     def __init__(self, hero_skin: int = 1) -> None:
         tileset = load_image("2 Locations/Tiles/Tileset.png")
+        self._tileset = tileset
+        self._theme_tiles: dict[str, tuple[pygame.Surface, pygame.Surface]] = {}
         self.floor = self._tile(tileset, 1, 1)
         self.wall = self._tile(tileset, 1, 4)
         self.door_locked = self._tile(tileset, 13, 5)
@@ -140,17 +165,25 @@ class Assets:
         }
 
     def hero_skin(self, number: int) -> dict[str, list[pygame.Surface]]:
-        """Animation frames for character 1, 2 or 3 (loaded once, then cached)."""
+        """Animation frames for a hero of the roster (loaded once, then cached)."""
         if number not in self._hero_skins:
-            hero_dir = f"1 Main Characters/{number}"
+            style = HEROES_BY_NUMBER.get(number, HEROES[0])
+            replacements = color_map(style)
+            hero_dir = f"1 Main Characters/{style.base}"
             scale = TILE / 32 * 1.25
             self._hero_skins[number] = {
-                "idle": strip(f"{hero_dir}/Idle.png", 32, scale),
-                "run": strip(f"{hero_dir}/Run.png", 32, scale),
-                "hit": strip(f"{hero_dir}/Hit.png", 32, scale),
-                "jump": strip(f"{hero_dir}/Jump.png", 32, scale),
+                state: slice_strip(recolored(load_image(f"{hero_dir}/{file_name}.png"), replacements), 32, scale)
+                for state, file_name in (("idle", "Idle"), ("run", "Run"), ("hit", "Hit"), ("jump", "Jump"))
             }
         return self._hero_skins[number]
+
+    def theme_tiles(self, theme: MapTheme) -> tuple[pygame.Surface, pygame.Surface]:
+        """(floor, wall) tiles of a map theme, tinted and cached."""
+        if theme.name not in self._theme_tiles:
+            floor = tinted(self._tile(self._tileset, *theme.floor), theme.floor_multiply, theme.add)
+            wall = tinted(self._tile(self._tileset, *theme.wall), theme.wall_multiply, theme.add)
+            self._theme_tiles[theme.name] = (floor, wall)
+        return self._theme_tiles[theme.name]
 
     @staticmethod
     def _tile(tileset: pygame.Surface, column: int, row: int) -> pygame.Surface:

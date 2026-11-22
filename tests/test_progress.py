@@ -69,3 +69,18 @@ def test_no_backup_folder_in_development(tmp_path):
     progress = Progress(tmp_path / "progress.json", None)
     assert progress.export_backup() is None
     assert progress.restore_backup() is None
+
+
+def test_old_bought_skins_are_refunded_once(tmp_path):
+    import json
+
+    from codequest.progress import Progress
+
+    save_file = tmp_path / "progress.json"
+    old = {"format": 2, "completed": [], "coins": 10, "owned": ["skin2", "skin3"], "skin": "skin3"}
+    save_file.write_text(json.dumps(old), encoding="utf-8")
+    progress = Progress(save_file, None)
+    assert progress.coins == 10 + 120 + 220
+    assert progress.skin == "skin3" and not progress.hero_picked
+    progress.save()
+    assert Progress(save_file, None).coins == 350

@@ -8,7 +8,9 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pytest
 
 from codequest import game, rewards
+from codequest.heroes import HEROES, HEROES_BY_NUMBER
 from codequest.levels import WORLDS
+from codequest.themes import THEMES
 
 from .conftest import requires_solutions, solution_for
 
@@ -56,16 +58,16 @@ def test_store_buy_and_equip(app):
     app.progress.coins = 500
     app.open_store()
     app.draw()
-    app.store._buy(rewards.ITEMS_BY_ID["skin3"])
-    assert "skin3" in app.progress.owned and app.progress.skin == "skin3"
+    app.store._buy(rewards.ITEMS_BY_ID["skin14"])
+    assert "skin14" in app.progress.owned and app.progress.skin == "skin14"
     app.store._equip("skin1")
     assert app.progress.skin == "skin1"
     app.store._buy(rewards.ITEMS_BY_ID["shield"])
     assert "shield" in app.progress.owned
-    assert app.progress.coins == 500 - 220 - 250
+    assert app.progress.coins == 500 - 200 - 250
     app.store._buy(rewards.ITEMS_BY_ID["heart1"])
     assert "heart1" not in app.progress.owned
-    assert app.progress.coins == 30
+    assert app.progress.coins == 50
     app.go_menu()
     app.draw()
 
@@ -73,3 +75,23 @@ def test_store_buy_and_equip(app):
 def test_sound_toggle_is_saved(app):
     app.toggle_sound()
     assert app.progress.muted and app.sound.muted
+
+
+def test_first_launch_opens_hero_picker(app):
+    assert app.scene == "heroes"
+    app.draw()
+    app.hero_view.choose(HEROES_BY_NUMBER[7])
+    assert app.progress.skin == "skin7"
+    app.hero_view.choose(HEROES_BY_NUMBER[15])
+    assert "skin15" not in app.progress.owned and app.progress.skin == "skin7"
+    app.hero_view.finish()
+    assert app.scene == "menu" and app.progress.hero_picked
+
+
+def test_every_hero_and_theme_renders(app):
+    for hero in HEROES:
+        frames = app.assets.hero_skin(hero.number)
+        assert all(frames[state] for state in ("idle", "run", "hit", "jump"))
+    for theme in THEMES:
+        floor, wall = app.assets.theme_tiles(theme)
+        assert floor.get_size() == wall.get_size()

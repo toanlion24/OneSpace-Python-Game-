@@ -30,6 +30,7 @@ from .engine import (
     run_code,
     upgrades_apply,
 )
+from .hero_view import HeroView
 from .hud import (
     Confetti,
     draw_chest,
@@ -58,6 +59,7 @@ from .rewards import (
 )
 from .sound import SoundBoard
 from .store_view import StoreView
+from .themes import theme_for_world
 from .theory import THEORY
 from .theory_view import TheoryView
 
@@ -463,6 +465,7 @@ class App:
         self.win_summary: RewardSummary | None = None
         self.win_time = 0.0
         self.store = StoreView(self)
+        self.hero_view = HeroView(self)
         self.editor = CodeEditor(self.font_code, self.font_small)
         self.levels = all_levels()
         self.scene = "menu"
@@ -486,6 +489,8 @@ class App:
         if self.progress.restored_from_backup:
             self.show_toast("Đã tự khôi phục tiến độ từ bản sao lưu trong Documents.")
         self._build_menu()
+        if not self.progress.hero_picked:
+            self.open_heroes(first_time=True)
 
     # ------------------------------------------------------------ scenes
     def _first_unfinished_stage(self) -> int:
@@ -518,6 +523,7 @@ class App:
             Button(pygame.Rect(1020, 72, 196, 36), "Khôi phục tiến độ", self.restore_progress, (90, 80, 140)),
             Button(pygame.Rect(812, 30, 196, 36), "Cửa hàng & Huy hiệu", self.open_store, (170, 120, 40)),
             Button(pygame.Rect(812, 72, 96, 36), sound_label, self.toggle_sound, (70, 80, 120)),
+            Button(pygame.Rect(914, 72, 100, 36), "Nhân vật", self.open_heroes, (40, 130, 160)),
         ]
 
     def toggle_sound(self) -> None:
@@ -527,6 +533,11 @@ class App:
         self._build_tool_buttons()
         self._build_play_buttons()
         self.sound.play("click")
+
+    def open_heroes(self, first_time: bool = False) -> None:
+        self.save_code()
+        self.scene = "heroes"
+        self.hero_view.build(first_time)
 
     def open_store(self) -> None:
         self.save_code()
@@ -760,6 +771,9 @@ class App:
         if self.scene == "store":
             self.store.handle_event(event)
             return
+        if self.scene == "heroes":
+            self.hero_view.handle_event(event)
+            return
         if self.scene == "menu":
             for button in [*self.menu_buttons, *self.menu_tool_buttons]:
                 if button.handle_event(event):
@@ -824,6 +838,8 @@ class App:
     def draw(self) -> None:
         if self.scene == "store":
             self.store.draw(self.screen)
+        elif self.scene == "heroes":
+            self.hero_view.draw(self.screen)
         elif self.scene == "menu":
             self.draw_menu()
         else:
@@ -914,6 +930,12 @@ class App:
         self.screen.blit(header, (132, 20))
 
         draw_panel(self.screen, VIEW_RECT, alpha=150)
+        theme = theme_for_world(world_info.number)
+        backdrop = pygame.Surface(VIEW_RECT.inflate(-4, -4).size, pygame.SRCALPHA)
+        pygame.draw.rect(backdrop, (*theme.backdrop, 150), backdrop.get_rect(), border_radius=9)
+        self.screen.blit(backdrop, VIEW_RECT.inflate(-4, -4).topleft)
+        theme_label = self.font_small.render(f"Bản đồ: {theme.name}", True, COLOR_MUTED)
+        self.screen.blit(theme_label, theme_label.get_rect(bottomright=(VIEW_RECT.right - 14, VIEW_RECT.bottom - 8)))
         self.draw_map()
         self.draw_hearts()
         self.draw_star_goals()
@@ -957,6 +979,7 @@ class App:
         world = self.playback.terrain_world
         playback = self.playback
         origin_x, origin_y = self._map_origin()
+        floor_tile, wall_tile = self.assets.theme_tiles(theme_for_world(world_of(self.level.id).number))
 
         for (x, y), terrain in world.terrain.items():
             screen_position = (origin_x + x * TILE, origin_y + y * TILE)
@@ -964,9 +987,9 @@ class App:
             if char == " ":
                 continue
             if terrain == "wall":
-                self.screen.blit(self.assets.wall, screen_position)
+                self.screen.blit(wall_tile, screen_position)
             else:
-                self.screen.blit(self.assets.floor, screen_position)
+                self.screen.blit(floor_tile, screen_position)
 
         for (x, y), terrain in world.terrain.items():
             if terrain == "spike":

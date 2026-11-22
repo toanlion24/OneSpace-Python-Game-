@@ -8,6 +8,7 @@ File được tạo tự động từ package codequest/ bằng merge_single_fil
 from __future__ import annotations
 
 import ast
+import colorsys
 import ctypes
 import json
 import keyword
@@ -6995,6 +6996,133 @@ THEORY.update(PRACTICE_THEORY)
 
 
 # ======================================================================
+# heroes.py
+# ======================================================================
+
+Color = tuple[int, int, int]
+
+# Các màu được phép đổi của từng nhân vật gốc; da, mắt, viền giữ nguyên.
+RECOLOR_PALETTES: dict[int, tuple[Color, ...]] = {
+    # Bạn Nhỏ: tóc, cà vạt, áo vest.
+    1: ((161, 71, 68), (132, 51, 70), (204, 48, 72), (156, 27, 77), (72, 71, 91)),
+    # Rô-bốt: vỏ máy.
+    2: ((225, 202, 51), (206, 139, 22), (247, 236, 138), (186, 87, 11)),
+    # Cáo: bộ lông.
+    3: ((210, 97, 47), (178, 46, 32), (230, 141, 65)),
+}
+
+
+@dataclass(frozen=True)
+class HeroStyle:
+    number: int
+    name: str
+    description: str
+    base: int
+    hue_shift: float = 0.0
+    saturation: float = 1.0
+    brightness: float = 1.0
+    price: int = 0
+
+    @property
+    def item_id(self) -> str:
+        return f"skin{self.number}"
+
+    @property
+    def is_recolored(self) -> bool:
+        return (self.hue_shift, self.saturation, self.brightness) != (0.0, 1.0, 1.0)
+
+
+HEROES: list[HeroStyle] = [
+    HeroStyle(1, "Bạn Nhỏ", "Cậu học trò thích phiêu lưu.", 1),
+    HeroStyle(2, "Rô-bốt Vàng", "Rô-bốt tinh nghịch.", 2),
+    HeroStyle(3, "Cáo Lửa", "Cáo nhanh nhẹn.", 3),
+    HeroStyle(4, "Bạn Tóc Xanh", "Tóc xanh biển, áo xanh.", 1, hue_shift=205),
+    HeroStyle(5, "Bạn Tóc Tím", "Thích màu tím mộng mơ.", 1, hue_shift=270),
+    HeroStyle(6, "Bạn Tóc Vàng", "Tóc vàng như nắng.", 1, hue_shift=45, brightness=1.35),
+    HeroStyle(7, "Rô-bốt Lá", "Rô-bốt chạy bằng năng lượng xanh.", 2, hue_shift=55),
+    HeroStyle(8, "Rô-bốt Biển", "Rô-bốt lặn biển.", 2, hue_shift=150),
+    HeroStyle(9, "Rô-bốt Hồng", "Rô-bốt kẹo bông.", 2, hue_shift=270, saturation=0.8),
+    HeroStyle(10, "Rô-bốt Bạc", "Vỏ thép sáng bóng.", 2, saturation=0.08, brightness=1.05),
+    HeroStyle(11, "Cáo Tuyết", "Cáo trắng xứ lạnh.", 3, saturation=0.12, brightness=1.3),
+    HeroStyle(12, "Cáo Đêm", "Cáo xanh tím ban đêm.", 3, hue_shift=225),
+    HeroStyle(13, "Rô-bốt Bóng Đêm", "Nhân vật hiếm: vỏ đen huyền bí.", 2, saturation=0.25, brightness=0.45, price=150),
+    HeroStyle(14, "Cáo Ngọc", "Nhân vật hiếm: lông xanh ngọc.", 3, hue_shift=150, price=200),
+    HeroStyle(15, "Bạn Nhỏ Hoàng Kim", "Nhân vật hiếm: vest vàng óng.", 1, hue_shift=48, saturation=1.4,
+              brightness=1.6, price=260),
+]
+HEROES_BY_NUMBER: dict[int, HeroStyle] = {hero.number: hero for hero in HEROES}
+FREE_HEROES: list[HeroStyle] = [hero for hero in HEROES if hero.price == 0]
+RARE_HEROES: list[HeroStyle] = [hero for hero in HEROES if hero.price > 0]
+
+
+def recolor(color: Color, style: HeroStyle) -> Color:
+    """Đổi một màu theo kiểu của nhân vật (xoay màu, chỉnh độ đậm và độ sáng)."""
+    red, green, blue = (channel / 255 for channel in color)
+    hue, saturation, value = colorsys.rgb_to_hsv(red, green, blue)
+    hue = (hue + style.hue_shift / 360) % 1.0
+    saturation = min(1.0, saturation * style.saturation)
+    value = min(1.0, value * style.brightness)
+    new_red, new_green, new_blue = colorsys.hsv_to_rgb(hue, saturation, value)
+    return round(new_red * 255), round(new_green * 255), round(new_blue * 255)
+
+
+def color_map(style: HeroStyle) -> dict[Color, Color]:
+    """Bảng đổi màu cho sprite của nhân vật gốc."""
+    if not style.is_recolored:
+        return {}
+    return {color: recolor(color, style) for color in RECOLOR_PALETTES[style.base]}
+
+
+# ======================================================================
+# themes.py
+# ======================================================================
+
+Color = tuple[int, int, int]
+NO_TINT: Color = (255, 255, 255)
+NO_ADD: Color = (0, 0, 0)
+
+
+@dataclass(frozen=True)
+class MapTheme:
+    name: str
+    floor: tuple[int, int]
+    wall: tuple[int, int]
+    floor_multiply: Color = NO_TINT
+    wall_multiply: Color = NO_TINT
+    add: Color = NO_ADD
+    # Màu nền khung bản đồ (phía sau ô gạch).
+    backdrop: Color = (24, 28, 40)
+
+
+THEMES: list[MapTheme] = [
+    MapTheme("Sân gạch", floor=(1, 1), wall=(1, 4)),
+    MapTheme("Đồi đất đỏ", floor=(7, 1), wall=(7, 8), backdrop=(40, 26, 22)),
+    MapTheme("Rừng rêu", floor=(1, 1), wall=(1, 5), floor_multiply=(170, 220, 150), wall_multiply=(150, 205, 140),
+             backdrop=(20, 36, 26)),
+    MapTheme("Phòng thép", floor=(12, 1), wall=(1, 5), backdrop=(30, 34, 44)),
+    MapTheme("Sa mạc", floor=(7, 1), wall=(7, 8), floor_multiply=(255, 225, 150), wall_multiply=(255, 220, 160),
+             add=(50, 40, 10), backdrop=(52, 42, 24)),
+    MapTheme("Băng tuyết", floor=(12, 1), wall=(1, 4), floor_multiply=(210, 235, 255), wall_multiply=(170, 210, 255),
+             add=(20, 26, 36), backdrop=(26, 36, 52)),
+    MapTheme("Lâu đài tím", floor=(12, 1), wall=(1, 4), floor_multiply=(225, 205, 255), wall_multiply=(190, 150, 255),
+             backdrop=(30, 20, 44)),
+    MapTheme("Hang đêm", floor=(1, 1), wall=(1, 4), floor_multiply=(120, 120, 190), wall_multiply=(110, 110, 160),
+             backdrop=(12, 12, 24)),
+]
+
+# World -> kiểu bản đồ: mỗi giai đoạn đổi cảnh, các World liền nhau không trùng kiểu.
+WORLD_THEMES: dict[int, int] = {
+    1: 0, 2: 2, 3: 1, 4: 0, 5: 2, 6: 3, 7: 4, 8: 1,
+    9: 5, 10: 3, 11: 6, 12: 4, 13: 7, 14: 5, 15: 2, 16: 6,
+    17: 3, 18: 7, 19: 1, 20: 5, 21: 6, 22: 4, 23: 7,
+}
+
+
+def theme_for_world(world_number: int) -> MapTheme:
+    return THEMES[WORLD_THEMES.get(world_number, 0)]
+
+
+# ======================================================================
 # rewards.py
 # ======================================================================
 
@@ -7025,15 +7153,18 @@ class ShopItem:
     requires: str | None = None
 
 
-SHOP_ITEMS: list[ShopItem] = [
-    ShopItem("skin1", "Bạn Nhỏ", "Nhân vật mặc định.", 0, "skin", skin_number=1),
-    ShopItem("skin2", "Rô-bốt Vàng", "Nhân vật rô-bốt tinh nghịch.", 120, "skin", skin_number=2),
-    ShopItem("skin3", "Cáo Lửa", "Nhân vật cáo nhanh nhẹn.", 220, "skin", skin_number=3),
+SKIN_ITEMS: list[ShopItem] = [
+    ShopItem(hero.item_id, hero.name, hero.description, hero.price, "skin", skin_number=hero.number)
+    for hero in HEROES
+]
+UPGRADE_ITEMS: list[ShopItem] = [
     ShopItem("heart1", "Tim thêm I", "+1 máu tối đa ở các màn thường.", 150, "heart"),
     ShopItem("heart2", "Tim thêm II", "+1 máu tối đa nữa (cần Tim thêm I).", 300, "heart", requires="heart1"),
     ShopItem("shield", "Khiên gỗ", "Đỡ giúp đòn đầu tiên trong mỗi màn thường.", 250, "shield"),
 ]
-ITEMS_BY_ID: dict[str, ShopItem] = {item.id: item for item in SHOP_ITEMS}
+# Cửa hàng chỉ bán nhân vật hiếm và vật phẩm; nhân vật miễn phí chọn ở màn Chọn nhân vật.
+SHOP_ITEMS: list[ShopItem] = [item for item in SKIN_ITEMS if item.price] + UPGRADE_ITEMS
+ITEMS_BY_ID: dict[str, ShopItem] = {item.id: item for item in [*SKIN_ITEMS, *UPGRADE_ITEMS]}
 
 
 @dataclass
@@ -7114,7 +7245,7 @@ def apply_win(progress: object, level: Level, world_levels: list[Level], world_n
 # ---------------------------------------------------------------- shop
 def bonus_hp(progress: object) -> int:
     owned: set[str] = progress.owned  # type: ignore[attr-defined]
-    return sum(1 for item_id in owned if ITEMS_BY_ID.get(item_id, SHOP_ITEMS[0]).kind == "heart")
+    return sum(1 for item_id in owned if item_id in ITEMS_BY_ID and ITEMS_BY_ID[item_id].kind == "heart")
 
 
 def has_shield(progress: object) -> bool:
@@ -7154,7 +7285,7 @@ def equip_skin(progress: object, item_id: str) -> bool:
 
 
 def skin_number(progress: object) -> int:
-    item = ITEMS_BY_ID.get(getattr(progress, "skin", DEFAULT_SKIN), SHOP_ITEMS[0])
+    item = ITEMS_BY_ID.get(getattr(progress, "skin", DEFAULT_SKIN), SKIN_ITEMS[0])
     return item.skin_number
 
 
@@ -8462,6 +8593,26 @@ def slice_strip(sheet: pygame.Surface, frame_width: int, scale: float) -> list[p
     return frames
 
 
+def recolored(sheet: pygame.Surface, replacements: dict[tuple[int, int, int], tuple[int, int, int]]) -> pygame.Surface:
+    if not replacements:
+        return sheet
+    result = sheet.copy()
+    pixels = pygame.PixelArray(result)
+    for old_color, new_color in replacements.items():
+        pixels.replace(old_color, new_color)
+    pixels.close()
+    return result
+
+
+def tinted(tile: pygame.Surface, multiply: tuple[int, int, int], add: tuple[int, int, int]) -> pygame.Surface:
+    result = tile.copy()
+    if multiply != (255, 255, 255):
+        result.fill(multiply, special_flags=pygame.BLEND_RGB_MULT)
+    if add != (0, 0, 0):
+        result.fill(add, special_flags=pygame.BLEND_RGB_ADD)
+    return result
+
+
 def strip(relative_path: str, frame_width: int, scale: float) -> list[pygame.Surface]:
     return slice_strip(load_image(relative_path), frame_width, scale)
 
@@ -8469,6 +8620,8 @@ def strip(relative_path: str, frame_width: int, scale: float) -> list[pygame.Sur
 class Assets:
     def __init__(self, hero_skin: int = 1) -> None:
         tileset = load_image("2 Locations/Tiles/Tileset.png")
+        self._tileset = tileset
+        self._theme_tiles: dict[str, tuple[pygame.Surface, pygame.Surface]] = {}
         self.floor = self._tile(tileset, 1, 1)
         self.wall = self._tile(tileset, 1, 4)
         self.door_locked = self._tile(tileset, 13, 5)
@@ -8504,17 +8657,25 @@ class Assets:
         }
 
     def hero_skin(self, number: int) -> dict[str, list[pygame.Surface]]:
-        """Animation frames for character 1, 2 or 3 (loaded once, then cached)."""
+        """Animation frames for a hero of the roster (loaded once, then cached)."""
         if number not in self._hero_skins:
-            hero_dir = f"1 Main Characters/{number}"
+            style = HEROES_BY_NUMBER.get(number, HEROES[0])
+            replacements = color_map(style)
+            hero_dir = f"1 Main Characters/{style.base}"
             scale = TILE / 32 * 1.25
             self._hero_skins[number] = {
-                "idle": strip(f"{hero_dir}/Idle.png", 32, scale),
-                "run": strip(f"{hero_dir}/Run.png", 32, scale),
-                "hit": strip(f"{hero_dir}/Hit.png", 32, scale),
-                "jump": strip(f"{hero_dir}/Jump.png", 32, scale),
+                state: slice_strip(recolored(load_image(f"{hero_dir}/{file_name}.png"), replacements), 32, scale)
+                for state, file_name in (("idle", "Idle"), ("run", "Run"), ("hit", "Hit"), ("jump", "Jump"))
             }
         return self._hero_skins[number]
+
+    def theme_tiles(self, theme: MapTheme) -> tuple[pygame.Surface, pygame.Surface]:
+        """(floor, wall) tiles of a map theme, tinted and cached."""
+        if theme.name not in self._theme_tiles:
+            floor = tinted(self._tile(self._tileset, *theme.floor), theme.floor_multiply, theme.add)
+            wall = tinted(self._tile(self._tileset, *theme.wall), theme.wall_multiply, theme.add)
+            self._theme_tiles[theme.name] = (floor, wall)
+        return self._theme_tiles[theme.name]
 
     @staticmethod
     def _tile(tileset: pygame.Surface, column: int, row: int) -> pygame.Surface:
@@ -8763,7 +8924,9 @@ class SoundBoard:
 # progress.py
 # ======================================================================
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
+# Giá nhân vật ở bản 1.3 - 1.4 (nay miễn phí, xu được trả lại khi mở tiến độ cũ).
+OLD_SKIN_PRICES: dict[str, int] = {"skin2": 120, "skin3": 220}
 # Xu thưởng cho mỗi sao (giữ giống rewards.STAR_COINS).
 STAR_COINS = 10
 BACKUP_NAME = "tien-do.json"
@@ -8786,6 +8949,14 @@ def _write_atomic(path: Path, text: str) -> None:
     os.replace(temporary, path)
 
 
+def _skin_refund(data: dict[str, Any]) -> int:
+    """Nhân vật từng phải mua (trước bản 1.5) nay miễn phí: trả lại số xu đã tiêu."""
+    if int(data.get("format", 1) or 1) >= 3:
+        return 0
+    owned = {str(item) for item in data.get("owned", [])}
+    return sum(price for item_id, price in OLD_SKIN_PRICES.items() if item_id in owned)
+
+
 class Progress:
     def __init__(self, main_file: Path, backup_dir: Path | None = None) -> None:
         self.main_file = main_file
@@ -8799,6 +8970,7 @@ class Progress:
         self.chests: set[int] = set()
         self.loot: dict[str, int] = {}
         self.muted = False
+        self.hero_picked = False
         self.restored_from_backup = False
         self._load()
 
@@ -8828,7 +9000,7 @@ class Progress:
             if isinstance(count, int):
                 self.stars[str(level_id)] = max(self.stars.get(str(level_id), 0), min(3, count))
         if isinstance(data.get("coins"), int):
-            self.coins = max(self.coins, data["coins"])
+            self.coins = max(self.coins, data["coins"] + _skin_refund(data))
         self.owned |= {str(item) for item in data.get("owned", [])}
         self.chests |= {int(world) for world in data.get("chests", []) if str(world).isdigit()}
         if self.skin == "skin1" and isinstance(data.get("skin"), str):
@@ -8838,6 +9010,8 @@ class Progress:
                 self.loot[str(level_id)] = max(self.loot.get(str(level_id), 0), count)
         if isinstance(data.get("muted"), bool):
             self.muted = data["muted"]
+        if data.get("hero_picked") is True:
+            self.hero_picked = True
         self._migrate_old_wins()
         return len(self.completed) - before
 
@@ -8863,6 +9037,7 @@ class Progress:
             "chests": sorted(self.chests),
             "loot": self.loot,
             "muted": self.muted,
+            "hero_picked": self.hero_picked,
         }
         return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -9030,6 +9205,190 @@ class StoreView:
         for button in self.buttons:
             button.draw(surface, app.font_small if len(button.label) > 8 else app.font)
         app.draw_toast()
+
+
+# ======================================================================
+# hero_view.py
+# ======================================================================
+
+if TYPE_CHECKING:
+    from .game import App
+
+HERO_COLOR_TEXT = (230, 232, 240)
+HERO_COLOR_MUTED = (150, 156, 180)
+HERO_COLOR_ACCENT = (255, 196, 64)
+HERO_COLOR_GOOD = (90, 220, 120)
+HERO_PANEL = pygame.Rect(40, 20, 1200, 690)
+GRID_LEFT = 64
+GRID_TOP = 120
+COLUMNS = 5
+CARD_SIZE = (168, 176)
+CARD_GAP = 12
+PREVIEW = pygame.Rect(GRID_LEFT + COLUMNS * (CARD_SIZE[0] + CARD_GAP) + 8, GRID_TOP, 0, 552)
+PREVIEW.width = HERO_PANEL.right - 24 - PREVIEW.x
+
+
+def card_rect(index: int) -> pygame.Rect:
+    row, column = divmod(index, COLUMNS)
+    return pygame.Rect(
+        GRID_LEFT + column * (CARD_SIZE[0] + CARD_GAP), GRID_TOP + row * (CARD_SIZE[1] + CARD_GAP), *CARD_SIZE
+    )
+
+
+def wrap_words(text: str, font: pygame.font.Font, width: int) -> list[str]:
+    lines: list[str] = []
+    current = ""
+    for word in text.split():
+        candidate = f"{current} {word}".strip()
+        if font.size(candidate)[0] <= width or not current:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+class HeroView:
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.buttons: list[Any] = []
+        self.first_time = False
+
+    def build(self, first_time: bool = False) -> None:
+        self.first_time = first_time
+        make_button = self.app.make_button
+        start_label = "Bắt đầu chơi →" if first_time else "Xong →"
+        self.buttons = [
+            make_button(pygame.Rect(PREVIEW.x + 20, PREVIEW.bottom - 64, PREVIEW.width - 40, 48), start_label,
+                        self.finish, (46, 140, 86)),
+        ]
+        if not first_time:
+            self.buttons.append(make_button(pygame.Rect(64, 36, 110, 38), "← Menu", self.finish))
+
+    # ------------------------------------------------------------ actions
+    def finish(self) -> None:
+        self.app.progress.hero_picked = True
+        self.app.progress.save()
+        self.app.sound.play("click")
+        self.app.go_menu()
+
+    def _is_owned(self, hero: HeroStyle) -> bool:
+        return hero.price == 0 or hero.item_id in self.app.progress.owned
+
+    def choose(self, hero: HeroStyle) -> None:
+        progress = self.app.progress
+        if self._is_owned(hero):
+            equip_skin(progress, hero.item_id)
+            progress.save()
+            self.app.sound.play("click")
+            return
+        item = ITEMS_BY_ID[hero.item_id]
+        ok, reason = can_buy(progress, item)
+        if not ok:
+            self.app.show_toast(f"{hero.name} là nhân vật hiếm: {reason}. Qua màn để nhận thêm xu!")
+            self.app.sound.play("fail")
+            return
+        buy(progress, item)
+        progress.save()
+        self.app.sound.play("coin")
+        self.app.show_toast(f"Đã mở khoá {hero.name}!")
+
+    def handle_event(self, event: pygame.event.Event) -> None:
+        for button in self.buttons:
+            if button.handle_event(event):
+                return
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for index, hero in enumerate(HEROES):
+                if card_rect(index).collidepoint(event.pos):
+                    self.choose(hero)
+                    return
+        if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_RETURN):
+            self.finish()
+
+    # ------------------------------------------------------------ drawing
+    def _hero_frame(self, number: int, state: str, scale: float) -> pygame.Surface:
+        frames = self.app.assets.hero_skin(number)[state]
+        frame = frames[int(self.app.time * 10) % len(frames)]
+        if scale == 1:
+            return frame
+        size = (round(frame.get_width() * scale), round(frame.get_height() * scale))
+        return pygame.transform.scale(frame, size)
+
+    def draw(self, surface: pygame.Surface) -> None:
+        app = self.app
+        progress = app.progress
+        app.draw_background(2)
+        pygame.draw.rect(surface, (22, 24, 34), HERO_PANEL, border_radius=10)
+        pygame.draw.rect(surface, (60, 66, 92), HERO_PANEL, width=2, border_radius=10)
+
+        title_x = 64 if self.first_time else 196
+        surface.blit(app.font_title.render("Chọn nhân vật của em", True, HERO_COLOR_ACCENT), (title_x, 34))
+        subtitle = "Bấm vào một nhân vật để chọn. Nhân vật hiếm mở khoá bằng xu kiếm được khi qua màn."
+        surface.blit(app.font_small.render(subtitle, True, HERO_COLOR_MUTED), (title_x, 76))
+        draw_coin(surface, (HERO_PANEL.right - 120, 52), 11)
+        surface.blit(app.font_bold.render(f"{progress.coins} xu", True, HERO_COLOR_TEXT), (HERO_PANEL.right - 102, 40))
+
+        current = skin_number(progress)
+        hovered_point = mouse_pos()
+        for index, hero in enumerate(HEROES):
+            rect = card_rect(index)
+            selected = hero.number == current
+            owned = self._is_owned(hero)
+            base_color = (34, 40, 58) if owned else (28, 30, 42)
+            if rect.collidepoint(hovered_point):
+                base_color = tuple(channel + 16 for channel in base_color)
+            pygame.draw.rect(surface, base_color, rect, border_radius=12)
+            border = HERO_COLOR_GOOD if selected else (HERO_COLOR_ACCENT if hero.price else (60, 66, 92))
+            pygame.draw.rect(surface, border, rect, width=3 if selected else 1, border_radius=12)
+
+            image = self._hero_frame(hero.number, "idle" if selected else "jump", 1.4)
+            if not owned:
+                image = image.copy()
+                image.fill((90, 90, 110), special_flags=pygame.BLEND_RGB_MULT)
+            surface.blit(image, image.get_rect(midbottom=(rect.centerx, rect.y + 120)))
+
+            name = app._fit_text(hero.name, rect.width - 12)
+            label = app.font_bold.render(name, True, HERO_COLOR_TEXT)
+            surface.blit(label, label.get_rect(midtop=(rect.centerx, rect.y + 124)))
+            if selected:
+                status, status_color = "Đang dùng", HERO_COLOR_GOOD
+            elif owned:
+                status, status_color = "Miễn phí" if hero.price == 0 else "Đã mở khoá", HERO_COLOR_MUTED
+            else:
+                status, status_color = f"Hiếm · {hero.price} xu", HERO_COLOR_ACCENT
+            status_text = app.font_small.render(status, True, status_color)
+            surface.blit(status_text, status_text.get_rect(midtop=(rect.centerx, rect.y + 150)))
+
+        self._draw_preview(surface, current)
+        for button in self.buttons:
+            button.draw(surface, app.font_bold)
+        app.draw_toast()
+
+    def _draw_preview(self, surface: pygame.Surface, current: int) -> None:
+        app = self.app
+        hero = next((style for style in HEROES if style.number == current), HEROES[0])
+        pygame.draw.rect(surface, (30, 34, 50), PREVIEW, border_radius=12)
+        # Nền xem trước đổi lần lượt qua các kiểu bản đồ.
+        theme = THEMES[int(app.time / 3) % len(THEMES)]
+        floor, wall = app.assets.theme_tiles(theme)
+        caption = app.font_small.render(f"Bản đồ: {theme.name}", True, HERO_COLOR_MUTED)
+        surface.blit(caption, caption.get_rect(midtop=(PREVIEW.centerx, PREVIEW.y + 14)))
+        stage_top = PREVIEW.y + 250
+        for x in range(PREVIEW.x + 12, PREVIEW.right - 12 - floor.get_width() + 1, floor.get_width()):
+            surface.blit(wall, (x, stage_top + floor.get_height()))
+            surface.blit(floor, (x, stage_top))
+        state = "run" if int(app.time) % 4 < 2 else "idle"
+        image = self._hero_frame(hero.number, state, 2.4)
+        surface.blit(image, image.get_rect(midbottom=(PREVIEW.centerx, stage_top + floor.get_height() - 4)))
+        name = app.font_title.render(hero.name, True, HERO_COLOR_ACCENT)
+        surface.blit(name, name.get_rect(midtop=(PREVIEW.centerx, stage_top + 2 * floor.get_height() + 20)))
+        lines = wrap_words(hero.description, app.font, PREVIEW.width - 40)
+        for line_index, line in enumerate(lines):
+            text = app.font.render(line, True, HERO_COLOR_TEXT)
+            surface.blit(text, text.get_rect(midtop=(PREVIEW.centerx, stage_top + 2 * floor.get_height() + 64
+                                                     + line_index * 24)))
 
 
 # ======================================================================
@@ -9438,6 +9797,7 @@ class App:
         self.win_summary: RewardSummary | None = None
         self.win_time = 0.0
         self.store = StoreView(self)
+        self.hero_view = HeroView(self)
         self.editor = CodeEditor(self.font_code, self.font_small)
         self.levels = all_levels()
         self.scene = "menu"
@@ -9461,6 +9821,8 @@ class App:
         if self.progress.restored_from_backup:
             self.show_toast("Đã tự khôi phục tiến độ từ bản sao lưu trong Documents.")
         self._build_menu()
+        if not self.progress.hero_picked:
+            self.open_heroes(first_time=True)
 
     # ------------------------------------------------------------ scenes
     def _first_unfinished_stage(self) -> int:
@@ -9493,6 +9855,7 @@ class App:
             Button(pygame.Rect(1020, 72, 196, 36), "Khôi phục tiến độ", self.restore_progress, (90, 80, 140)),
             Button(pygame.Rect(812, 30, 196, 36), "Cửa hàng & Huy hiệu", self.open_store, (170, 120, 40)),
             Button(pygame.Rect(812, 72, 96, 36), sound_label, self.toggle_sound, (70, 80, 120)),
+            Button(pygame.Rect(914, 72, 100, 36), "Nhân vật", self.open_heroes, (40, 130, 160)),
         ]
 
     def toggle_sound(self) -> None:
@@ -9502,6 +9865,11 @@ class App:
         self._build_tool_buttons()
         self._build_play_buttons()
         self.sound.play("click")
+
+    def open_heroes(self, first_time: bool = False) -> None:
+        self.save_code()
+        self.scene = "heroes"
+        self.hero_view.build(first_time)
 
     def open_store(self) -> None:
         self.save_code()
@@ -9735,6 +10103,9 @@ class App:
         if self.scene == "store":
             self.store.handle_event(event)
             return
+        if self.scene == "heroes":
+            self.hero_view.handle_event(event)
+            return
         if self.scene == "menu":
             for button in [*self.menu_buttons, *self.menu_tool_buttons]:
                 if button.handle_event(event):
@@ -9799,6 +10170,8 @@ class App:
     def draw(self) -> None:
         if self.scene == "store":
             self.store.draw(self.screen)
+        elif self.scene == "heroes":
+            self.hero_view.draw(self.screen)
         elif self.scene == "menu":
             self.draw_menu()
         else:
@@ -9889,6 +10262,12 @@ class App:
         self.screen.blit(header, (132, 20))
 
         draw_panel(self.screen, VIEW_RECT, alpha=150)
+        theme = theme_for_world(world_info.number)
+        backdrop = pygame.Surface(VIEW_RECT.inflate(-4, -4).size, pygame.SRCALPHA)
+        pygame.draw.rect(backdrop, (*theme.backdrop, 150), backdrop.get_rect(), border_radius=9)
+        self.screen.blit(backdrop, VIEW_RECT.inflate(-4, -4).topleft)
+        theme_label = self.font_small.render(f"Bản đồ: {theme.name}", True, COLOR_MUTED)
+        self.screen.blit(theme_label, theme_label.get_rect(bottomright=(VIEW_RECT.right - 14, VIEW_RECT.bottom - 8)))
         self.draw_map()
         self.draw_hearts()
         self.draw_star_goals()
@@ -9932,6 +10311,7 @@ class App:
         world = self.playback.terrain_world
         playback = self.playback
         origin_x, origin_y = self._map_origin()
+        floor_tile, wall_tile = self.assets.theme_tiles(theme_for_world(world_of(self.level.id).number))
 
         for (x, y), terrain in world.terrain.items():
             screen_position = (origin_x + x * TILE, origin_y + y * TILE)
@@ -9939,9 +10319,9 @@ class App:
             if char == " ":
                 continue
             if terrain == "wall":
-                self.screen.blit(self.assets.wall, screen_position)
+                self.screen.blit(wall_tile, screen_position)
             else:
-                self.screen.blit(self.assets.floor, screen_position)
+                self.screen.blit(floor_tile, screen_position)
 
         for (x, y), terrain in world.terrain.items():
             if terrain == "spike":

@@ -68,7 +68,9 @@ PHẦN THƯỞNG
 - Sao mới đổi ra xu. Qua hết các màn một World: mở rương, nhận huy hiệu và xu.
 - Trong màn có thùng gỗ (đập bằng hero.attack), chìa khoá + cửa khoá (hero.unlock)
   và rương báu (hero.open_chest) - mỗi rương mở được thêm xu.
-- Menu > "Cửa hàng & Huy hiệu": mua nhân vật, Tim thêm, Khiên gỗ; xem huy hiệu và cấp bậc.
+- Lần đầu mở game: chọn 1 trong 12 nhân vật miễn phí (đổi lại bằng nút "Nhân vật" ở menu).
+- Menu > "Cửa hàng & Huy hiệu": mua nhân vật hiếm, Tim thêm, Khiên gỗ; xem huy hiệu và cấp bậc.
+- Mỗi World có kiểu bản đồ riêng: sân gạch, rừng rêu, sa mạc, băng tuyết, hang đêm...
 
 KHUNG CODE
 - Gõ vài chữ đầu sẽ hiện gợi ý lệnh: Tab hoặc Enter để chọn, Esc để đóng, Ctrl+Space để mở lại.

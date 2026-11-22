@@ -24,7 +24,11 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
   - **Vật thể trong màn**: thùng gỗ phải đập vỡ (có thùng giấu ngọc), chìa khoá mở cửa khoá,
     rương báu mở ra được thêm xu.
   - Qua hết các màn một World thì **mở rương báu**: nhận **huy hiệu chiến thắng** + xu thưởng.
-  - **Cửa hàng**: dùng xu mua nhân vật (Rô-bốt Vàng, Cáo Lửa), Tim thêm (+1 máu), Khiên gỗ (đỡ đòn đầu tiên).
+  - **15 nhân vật**: mở game lần đầu là chọn nhân vật – 12 nhân vật miễn phí, 3 nhân vật hiếm mở khoá bằng xu.
+    Đổi nhân vật bất cứ lúc nào bằng nút **Nhân vật** ở menu.
+  - **8 kiểu bản đồ**: Sân gạch, Đồi đất đỏ, Rừng rêu, Phòng thép, Sa mạc, Băng tuyết, Lâu đài tím, Hang đêm –
+    mỗi World một cảnh riêng.
+  - **Cửa hàng**: dùng xu mua nhân vật hiếm, Tim thêm (+1 máu), Khiên gỗ (đỡ đòn đầu tiên).
   - Hiệu ứng pháo giấy, âm thanh (bật/tắt được).
 
 ## Tải game (Windows)
