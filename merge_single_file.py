@@ -34,6 +34,7 @@ MODULE_ORDER = [
     "assets",
     "hud",
     "sound",
+    "music",
     "progress",
     "store_view",
     "hero_view",

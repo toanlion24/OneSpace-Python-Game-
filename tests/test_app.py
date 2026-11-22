@@ -19,6 +19,8 @@ from .conftest import requires_solutions, solution_for
 def app(tmp_path, monkeypatch):
     monkeypatch.setattr(game, "PROGRESS_FILE", tmp_path / "progress.json")
     monkeypatch.setattr(game, "backup_dir", lambda: None)
+    # Không tổng hợp nhạc trong test giao diện (tốn vài giây, đã có test_music riêng).
+    monkeypatch.setattr(game.MusicPlayer, "_start_worker", lambda self: None)
     return game.App()
 
 
@@ -109,3 +111,15 @@ def test_hidden_map_is_replayed_after_main_map(app):
     assert not app.show_win
     app.run()
     assert app.hidden_shown == 0
+
+
+def test_music_toggle_is_saved(app):
+    app.go_menu()
+    assert app.music.enabled
+    app.toggle_music()
+    assert not app.music.enabled and not app.progress.music_on
+    reopened = game.Progress(app.progress.main_file, None)
+    assert reopened.music_on is False
+    level = WORLDS[3].levels[0]
+    app.open_level(level)
+    assert app.music.wanted != 0

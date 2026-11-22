@@ -32,6 +32,8 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
     mỗi World một cảnh riêng.
   - **Cửa hàng**: dùng xu mua nhân vật hiếm, Tim thêm (+1 máu), Khiên gỗ (đỡ đòn đầu tiên).
   - Hiệu ứng pháo giấy, âm thanh (bật/tắt được).
+  - **Nhạc nền lo-fi** dễ tập trung khi viết code: 4 bài tự tổng hợp (Cà phê code, Mưa đêm, Tập trung,
+    Trạm vũ trụ), mỗi World một bài; bật/tắt riêng bằng nút **Nhạc**.
 
 ## Tải game (Windows)
 
