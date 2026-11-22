@@ -5,6 +5,7 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
+import pygame
 import pytest
 
 from codequest import game, rewards
@@ -113,13 +114,32 @@ def test_hidden_map_is_replayed_after_main_map(app):
     assert app.hidden_shown == 0
 
 
-def test_music_toggle_is_saved(app):
+def test_music_panel_volume_and_track_are_saved(app):
     app.go_menu()
-    assert app.music.enabled
-    app.toggle_music()
-    assert not app.music.enabled and not app.progress.music_on
+    app.music_panel.open()
+    app.draw()
+    app.set_music_volume(70)
+    app.set_sfx_volume(30)
+    app.music_panel._choose(7)
+    assert app.music.wanted == 7 and app.music.volume_percent == 70
+    app.music_panel.close()
     reopened = game.Progress(app.progress.main_file, None)
-    assert reopened.music_on is False
-    level = WORLDS[3].levels[0]
-    app.open_level(level)
-    assert app.music.wanted != 0
+    assert (reopened.music_volume, reopened.sfx_volume, reopened.music_track) == (70, 30, 7)
+    app.open_level(WORLDS[3].levels[0])
+    assert app.music.wanted == 7
+
+
+def test_music_slider_and_auto_track(app):
+    app.music_panel.open()
+    slider = app.music_panel.music_slider
+    down = pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(slider.rect.x, slider.rect.centery))
+    app.handle_event(down)
+    assert app.progress.music_volume == 0 and not app.music.enabled
+    app.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=(slider.rect.right, slider.rect.centery), rel=(0, 0),
+                                        buttons=(1, 0, 0)))
+    app.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1, pos=(slider.rect.right, slider.rect.centery)))
+    assert app.progress.music_volume == 100
+    app.music_panel._choose(-1)
+    app.music_panel.close()
+    app.open_level(WORLDS[3].levels[0])
+    assert app.music.wanted == game.track_for_world(WORLDS[3].number)

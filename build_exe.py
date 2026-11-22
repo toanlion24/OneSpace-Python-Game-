@@ -73,7 +73,8 @@ PHẦN THƯỞNG
 - Lần đầu mở game: chọn 1 trong 12 nhân vật miễn phí (đổi lại bằng nút "Nhân vật" ở menu).
 - Menu > "Cửa hàng & Huy hiệu": mua nhân vật hiếm, Tim thêm, Khiên gỗ; xem huy hiệu và cấp bậc.
 - Mỗi World có kiểu bản đồ riêng: sân gạch, rừng rêu, sa mạc, băng tuyết, hang đêm...
-- Nhạc nền lo-fi giúp tập trung; bật/tắt bằng nút "Nhạc" (riêng với nút "Âm").
+- Nút "Nhạc": chỉnh âm lượng nhạc / hiệu ứng theo % và chọn bài (Lo-fi, 8-bit, Ambient, Jazz,
+  Synthwave, Acoustic, Piano). Kéo âm lượng nhạc về 0% để tắt nhạc.
 
 KHUNG CODE
 - Gõ vài chữ đầu sẽ hiện gợi ý lệnh: Tab hoặc Enter để chọn, Esc để đóng, Ctrl+Space để mở lại.

@@ -49,6 +49,7 @@ from .hud import (
 )
 from .levels import STAGES, WORLDS, all_levels, world_of
 from .music import MusicPlayer, track_for_world
+from .music_view import AUTO_TRACK, MusicPanel
 from .progress import Progress
 from .rewards import (
     LOOT_COINS,
@@ -473,8 +474,10 @@ class App:
         self.logo = load_logo(96)
         self.progress = Progress(PROGRESS_FILE, backup_dir())
         self.sound = SoundBoard(self.progress.muted)
-        self.music = MusicPlayer(self.progress.music_on)
-        self.music.select(0)
+        self.sound.set_volume(self.progress.sfx_volume)
+        self.music = MusicPlayer(self.progress.music_volume)
+        self.music.select(self._music_track_for(None))
+        self.music_panel = MusicPanel(self)
         self.confetti = Confetti()
         self.win_summary: RewardSummary | None = None
         self.win_time = 0.0
@@ -541,22 +544,42 @@ class App:
             Button(pygame.Rect(1016, 30, 98, 36), "Sao lưu", self.backup_progress, (46, 120, 90)),
             Button(pygame.Rect(1118, 30, 98, 36), "Khôi phục", self.restore_progress, (90, 80, 140)),
             Button(pygame.Rect(812, 72, 96, 36), sound_label, self.toggle_sound, (70, 80, 120)),
-            Button(pygame.Rect(912, 72, 96, 36), self._music_label(), self.toggle_music, (110, 70, 150)),
+            Button(pygame.Rect(912, 72, 96, 36), self._music_label(), self.music_panel.open, (110, 70, 150)),
             Button(pygame.Rect(1016, 72, 200, 36), "Nhân vật", self.open_heroes, (40, 130, 160)),
         ]
 
     def _music_label(self) -> str:
-        return "Nhạc: Bật" if self.music.enabled else "Nhạc: Tắt"
+        if not self.music.enabled:
+            return "Nhạc: Tắt"
+        return f"Nhạc: {self.music.volume_percent}%"
 
-    def toggle_music(self) -> None:
-        self.music.set_enabled(not self.music.enabled)
-        self.progress.music_on = self.music.enabled
-        self.progress.save()
+    def build_music_buttons(self) -> None:
         self._build_tool_buttons()
         self._build_play_buttons()
-        self.sound.play("click")
-        if self.music.enabled:
-            self.show_toast(f"Nhạc nền: {self.music.track_name}")
+
+    def _music_track_for(self, level: Level | None) -> int:
+        """Bài cần phát: bài em đã chọn, hoặc tự động (menu bài 0, mỗi World một bài)."""
+        if self.progress.music_track != AUTO_TRACK:
+            return self.progress.music_track
+        if level is None:
+            return 0
+        return track_for_world(world_of(level.id).number)
+
+    def choose_music_track(self, index: int) -> None:
+        self.progress.music_track = index
+        level = self.level if self.scene == "play" else None
+        self.music.select(self._music_track_for(level))
+        if not self.music.enabled:
+            self.set_music_volume(40)
+
+    def set_music_volume(self, percent: int) -> None:
+        self.progress.music_volume = max(0, min(100, percent))
+        self.music.set_volume(self.progress.music_volume)
+
+    def set_sfx_volume(self, percent: int) -> None:
+        self.progress.sfx_volume = max(0, min(100, percent))
+        self.sound.set_volume(self.progress.sfx_volume)
+        self.sound.play("coin")
 
     def toggle_sound(self) -> None:
         self.sound.muted = not self.sound.muted
@@ -656,7 +679,7 @@ class App:
         self.play_buttons.append(Button(pygame.Rect(16, 14, 100, 36), "← Menu", self.go_menu))
         sound_label = "Âm: Tắt" if self.sound.muted else "Âm: Bật"
         self.play_buttons.append(Button(pygame.Rect(1160, 14, 104, 36), sound_label, self.toggle_sound))
-        self.play_buttons.append(Button(pygame.Rect(1050, 14, 104, 36), self._music_label(), self.toggle_music))
+        self.play_buttons.append(Button(pygame.Rect(1050, 14, 104, 36), self._music_label(), self.music_panel.open))
 
     def open_level(self, level: Level) -> None:
         self.save_code()
@@ -671,7 +694,7 @@ class App:
         self.hint_index = 0
         self.show_win = False
         self.hidden_shown = 0
-        self.music.select(track_for_world(world_of(level.id).number))
+        self.music.select(self._music_track_for(level))
         self.log(f"Màn {level.id}: {level.title}", COLOR_ACCENT)
         self.log("Viết code bên phải rồi bấm Chạy (hoặc Ctrl+Enter).", COLOR_MUTED)
         self.log("Bộ gõ Telex có sẵn trong dấu nháy và ghi chú (F2 để bật/tắt).", COLOR_MUTED)
@@ -690,7 +713,7 @@ class App:
     def go_menu(self) -> None:
         self.save_code()
         self.scene = "menu"
-        self.music.select(0)
+        self.music.select(self._music_track_for(None))
         self._build_menu()
 
     def next_level(self) -> None:
@@ -822,6 +845,9 @@ class App:
         pygame.quit()
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if self.music_panel.visible:
+            self.music_panel.handle_event(event)
+            return
         if self.scene == "store":
             self.store.handle_event(event)
             return
@@ -899,6 +925,8 @@ class App:
             self.draw_menu()
         else:
             self.draw_play()
+        if self.music_panel.visible:
+            self.music_panel.draw(self.screen)
 
     def draw_menu(self) -> None:
         self.draw_background(4)

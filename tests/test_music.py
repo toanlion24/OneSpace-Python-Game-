@@ -3,6 +3,7 @@
 import numpy as np
 
 from codequest.music import (
+    GENRE_NAMES,
     SAMPLE_RATE,
     TRACKS,
     MusicPlayer,
@@ -12,7 +13,7 @@ from codequest.music import (
 )
 
 # Bài ngắn (1 hợp âm x 4 ô nhịp) để test chạy nhanh; bài thật dùng cùng hàm compose.
-SHORT = TrackSpec("Thử", 90, (TRACKS[0].chords[0],), seed=5, rain=True)
+SHORT = TrackSpec("Thử", "lofi", 90, (TRACKS[0].chords[0],), seed=5, rain=True)
 
 
 def test_track_is_a_long_quiet_stereo_loop():
@@ -35,9 +36,24 @@ def test_worlds_use_level_tracks_not_menu_track():
 
 
 def test_player_without_audio_device_does_nothing():
-    player = MusicPlayer(enabled=True)
+    player = MusicPlayer(40)
     player._channel = None
     player.select(2)
     player.update()
-    player.set_enabled(False)
-    assert player.playing is None
+    player.set_volume(0)
+    assert player.playing is None and not player.enabled
+
+
+def test_every_genre_has_a_track():
+    assert {track.style for track in TRACKS} == set(GENRE_NAMES)
+
+
+def test_old_music_off_setting_becomes_zero_percent(tmp_path):
+    import json
+
+    from codequest.progress import Progress
+
+    save_file = tmp_path / "progress.json"
+    save_file.write_text(json.dumps({"format": 3, "music_on": False}), encoding="utf-8")
+    progress = Progress(save_file, None)
+    assert progress.music_volume == 0 and progress.sfx_volume == 80 and progress.music_track == -1

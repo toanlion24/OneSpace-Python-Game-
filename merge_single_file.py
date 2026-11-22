@@ -36,6 +36,7 @@ MODULE_ORDER = [
     "sound",
     "music",
     "progress",
+    "music_view",
     "store_view",
     "hero_view",
     "game",
@@ -48,6 +49,9 @@ RENAMES: dict[str, dict[str, str]] = {
     "theory_view": {r"COLOR_(\w+)": r"THEORY_COLOR_\1"},
     "store_view": {r"COLOR_(\w+)": r"STORE_COLOR_\1"},
     "hero_view": {r"COLOR_(\w+)": r"HERO_COLOR_\1", "PANEL": "HERO_PANEL"},
+    # telex.py cũng có hàm compose (ghép dấu tiếng Việt).
+    "music": {"compose": "compose_track"},
+    "music_view": {r"COLOR_(\w+)": r"MUSIC_COLOR_\1", "PANEL": "MUSIC_PANEL"},
 }
 
 SOURCE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {

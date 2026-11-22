@@ -60,7 +60,10 @@ class Progress:
         self.chests: set[int] = set()
         self.loot: dict[str, int] = {}
         self.muted = False
-        self.music_on = True
+        self.music_volume = 40
+        self.sfx_volume = 80
+        # Bài nhạc đã chọn; -1 = tự động theo World.
+        self.music_track = -1
         self.hero_picked = False
         self.restored_from_backup = False
         self._load()
@@ -101,8 +104,14 @@ class Progress:
                 self.loot[str(level_id)] = max(self.loot.get(str(level_id), 0), count)
         if isinstance(data.get("muted"), bool):
             self.muted = data["muted"]
-        if isinstance(data.get("music_on"), bool):
-            self.music_on = data["music_on"]
+        if data.get("music_on") is False:
+            self.music_volume = 0
+        for name in ("music_volume", "sfx_volume", "music_track"):
+            value = data.get(name)
+            if isinstance(value, int) and not isinstance(value, bool):
+                setattr(self, name, value)
+        self.music_volume = max(0, min(100, self.music_volume))
+        self.sfx_volume = max(0, min(100, self.sfx_volume))
         if data.get("hero_picked") is True:
             self.hero_picked = True
         self._migrate_old_wins()
@@ -130,7 +139,9 @@ class Progress:
             "chests": sorted(self.chests),
             "loot": self.loot,
             "muted": self.muted,
-            "music_on": self.music_on,
+            "music_volume": self.music_volume,
+            "sfx_volume": self.sfx_volume,
+            "music_track": self.music_track,
             "hero_picked": self.hero_picked,
         }
         return json.dumps(data, ensure_ascii=False, indent=2)

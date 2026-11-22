@@ -63,6 +63,11 @@ class SoundBoard:
         except (pygame.error, TypeError, ValueError):
             self.sounds = {}
 
+    def set_volume(self, percent: int) -> None:
+        """Âm lượng hiệu ứng theo phần trăm (0 = im lặng)."""
+        for sound in self.sounds.values():
+            sound.set_volume(max(0, min(100, percent)) / 100)
+
     def play(self, name: str) -> None:
         if self.muted:
             return
