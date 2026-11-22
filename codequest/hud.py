@@ -171,3 +171,96 @@ def draw_chest(surface: pygame.Surface, rect: pygame.Rect, opened: bool, time_va
     pygame.draw.rect(surface, GOLD, band)
     if not opened:
         pygame.draw.rect(surface, GOLD_DARK, (base.centerx - 5, base.y - 3, 10, 8), border_radius=2)
+
+
+# ---------------------------------------------------------------- map atmosphere
+AMBIENT_SEEDS = [
+    (random.Random(index).random(), random.Random(index * 7 + 3).random(), random.Random(index * 13 + 5).random())
+    for index in range(48)
+]
+
+
+def draw_ambient(surface: pygame.Surface, area: pygame.Rect, kind: str, time_value: float) -> None:
+    """Hạt không khí theo kiểu bản đồ (tuyết, bụi, đom đóm...), tính thẳng từ thời gian - không cần lưu trạng thái."""
+    if not kind:
+        return
+    previous_clip = surface.get_clip()
+    surface.set_clip(area)
+    for seed_x, seed_y, seed_speed in AMBIENT_SEEDS:
+        if kind == "snow":
+            speed = 18 + 30 * seed_speed
+            x = area.x + (seed_x * area.width + 14 * math.sin(time_value * 1.3 + seed_y * 9)) % area.width
+            y = area.y + (seed_y * area.height + time_value * speed) % area.height
+            pygame.draw.circle(surface, (235, 245, 255), (int(x), int(y)), 2 if seed_speed > 0.5 else 1)
+        elif kind == "dust":
+            speed = 12 + 22 * seed_speed
+            x = area.x + (seed_x * area.width + time_value * speed) % area.width
+            y = area.y + (seed_y * area.height + 6 * math.sin(time_value + seed_x * 7)) % area.height
+            dot = pygame.Surface((3, 3), pygame.SRCALPHA)
+            dot.fill((240, 210, 150, 110))
+            surface.blit(dot, (int(x), int(y)))
+        elif kind == "leaves":
+            if seed_speed < 0.6:
+                continue
+            speed = 16 + 18 * seed_speed
+            x = area.x + (seed_x * area.width + time_value * speed * 0.6) % area.width
+            y = area.y + (seed_y * area.height + time_value * speed) % area.height
+            sway = math.sin(time_value * 2 + seed_x * 11)
+            pygame.draw.ellipse(surface, (110, 190, 90), (int(x + 6 * sway), int(y), 6, 3))
+        elif kind == "fireflies":
+            if seed_speed < 0.45:
+                continue
+            x = area.x + seed_x * area.width + 22 * math.sin(time_value * 0.7 + seed_y * 13)
+            y = area.y + seed_y * area.height + 16 * math.cos(time_value * 0.9 + seed_x * 17)
+            glow = 0.5 + 0.5 * math.sin(time_value * 3 + seed_speed * 20)
+            halo = pygame.Surface((14, 14), pygame.SRCALPHA)
+            pygame.draw.circle(halo, (200, 255, 120, int(70 * glow)), (7, 7), 7)
+            surface.blit(halo, (int(x) - 7, int(y) - 7))
+            pygame.draw.circle(surface, (230, 255, 160), (int(x), int(y)), 1 + int(glow + 0.5))
+        elif kind == "sparkle":
+            twinkle = math.sin(time_value * 2.5 + seed_speed * 30)
+            if twinkle < 0.3:
+                continue
+            x = area.x + seed_x * area.width
+            y = area.y + seed_y * area.height
+            size = int(2 + 3 * twinkle)
+            color = (230, 200, 255)
+            pygame.draw.line(surface, color, (x - size, y), (x + size, y))
+            pygame.draw.line(surface, color, (x, y - size), (x, y + size))
+    surface.set_clip(previous_clip)
+
+
+def make_vignette(size: tuple[int, int], strength: int = 120) -> pygame.Surface:
+    """Viền tối mềm quanh khung bản đồ để mắt tập trung vào giữa."""
+    small = pygame.Surface((40, 24), pygame.SRCALPHA)
+    for x in range(40):
+        for y in range(24):
+            distance = math.hypot((x - 19.5) / 19.5, (y - 11.5) / 11.5) / math.sqrt(2)
+            alpha = int(strength * max(0.0, distance - 0.35) / 0.65) if distance > 0.35 else 0
+            small.set_at((x, y), (0, 0, 0, min(255, alpha)))
+    return pygame.transform.smoothscale(small, size)
+
+
+def make_soft_ellipse(size: tuple[int, int], color: tuple[int, int, int], alpha: int) -> pygame.Surface:
+    """Hình elip mờ dần ra mép (bóng đổ, quầng sáng)."""
+    surface = pygame.Surface(size, pygame.SRCALPHA)
+    steps = 6
+    for step in range(steps):
+        fraction = 1 - step / steps
+        rect = pygame.Rect(0, 0, int(size[0] * fraction), int(size[1] * fraction))
+        rect.center = (size[0] // 2, size[1] // 2)
+        pygame.draw.ellipse(surface, (*color, alpha // steps), rect)
+    return surface
+
+
+def make_edge_shadow(width: int, height: int, alpha: int, vertical: bool) -> pygame.Surface:
+    """Dải bóng mờ dần: tường đổ bóng xuống sàn."""
+    surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    length = height if vertical else width
+    for index in range(length):
+        value = int(alpha * (1 - index / length) ** 2)
+        if vertical:
+            pygame.draw.line(surface, (0, 0, 0, value), (0, index), (width - 1, index))
+        else:
+            pygame.draw.line(surface, (0, 0, 0, value), (index, 0), (index, height - 1))
+    return surface

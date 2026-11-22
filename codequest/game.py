@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import sys
 from collections.abc import Callable
@@ -26,6 +27,7 @@ from .engine import (
     RunResult,
     World,
     hero_hp_limits,
+    hidden_levels,
     requirement_label,
     run_code,
     upgrades_apply,
@@ -33,6 +35,7 @@ from .engine import (
 from .hero_view import HeroView
 from .hud import (
     Confetti,
+    draw_ambient,
     draw_chest,
     draw_coin,
     draw_key,
@@ -40,6 +43,9 @@ from .hud import (
     draw_shield,
     draw_star,
     draw_star_row,
+    make_edge_shadow,
+    make_soft_ellipse,
+    make_vignette,
 )
 from .levels import STAGES, WORLDS, all_levels, world_of
 from .progress import Progress
@@ -68,6 +74,11 @@ FPS = 60
 PROGRESS_FILE = user_data_dir() / "progress.json"
 
 VIEW_RECT = pygame.Rect(16, 64, 736, 440)
+# Vùng vẽ bản đồ trong khung (chừa chỗ cho tim / sao ở trên và tên bản đồ ở dưới).
+MAP_AREA = pygame.Rect(VIEW_RECT.x + 16, VIEW_RECT.y + 40, VIEW_RECT.width - 32, VIEW_RECT.height - 70)
+MAP_MAX_SCALE = 2.0
+# Chừa một hàng phía trên cho nhân vật / cúp cao hơn một ô.
+MAP_TOP_PAD = 48
 CONSOLE_RECT = pygame.Rect(16, 516, 736, 188)
 THEORY_RECT = pygame.Rect(16, 64, 736, 640)
 MENU_LEFT = 64
@@ -471,6 +482,10 @@ class App:
         self.scene = "menu"
         self.level: Level = self.levels[0]
         self.playback = self._new_playback(self.level)
+        # Số thứ tự bản đồ kiểm tra ẩn đang được diễn lại (0 = bản đồ chính).
+        self.hidden_shown = 0
+        self._effects: dict[str, pygame.Surface] | None = None
+        self._map_layer: pygame.Surface | None = None
         self.console: list[tuple[str, tuple[int, int, int]]] = []
         self.hint_index = 0
         self.speed_options = [1.0, 2.0, 4.0]
@@ -637,6 +652,7 @@ class App:
         self.console = []
         self.hint_index = 0
         self.show_win = False
+        self.hidden_shown = 0
         self.log(f"Màn {level.id}: {level.title}", COLOR_ACCENT)
         self.log("Viết code bên phải rồi bấm Chạy (hoặc Ctrl+Enter).", COLOR_MUTED)
         self.log("Bộ gõ Telex có sẵn trong dấu nháy và ghi chú (F2 để bật/tắt).", COLOR_MUTED)
@@ -684,10 +700,17 @@ class App:
         bonus_hp, shield = self._upgrades()
         result = run_code(self.level, self.editor.text, bonus_hp, shield)
         self.editor.error_line = result.error_line
+        self._show_main_map()
         self.playback.start(result)
+
+    def _show_main_map(self) -> None:
+        if self.hidden_shown:
+            self.playback = self._new_playback(self.level)
+            self.hidden_shown = 0
 
     def reset_code(self) -> None:
         self.editor.set_text(self.level.starter)
+        self._show_main_map()
         self.playback.reset()
         self.console = []
         self.log("Đã khôi phục code ban đầu.", COLOR_MUTED)
@@ -717,8 +740,19 @@ class App:
         result = self.playback.result
         if result is None:
             return
+        failure = result.hidden_failure
+        if failure is not None and not self.hidden_shown:
+            self.log("Bản đồ chính: đi đúng!", COLOR_GOOD)
+            self.log(f"Thử tiếp code trên bản đồ kiểm tra ẩn {failure.index}...", COLOR_INFO)
+            self.hidden_shown = failure.index
+            self.playback = self._new_playback(failure.level)
+            self.playback.start(RunResult(failure.events, False, result.message, failure.error_line))
+            self.editor.error_line = failure.error_line
+            return
         if result.won:
             self.log("[OK] " + result.message, COLOR_GOOD)
+            if result.hidden_passed:
+                self.log(f"Code còn đúng trên cả {result.hidden_passed} bản đồ kiểm tra ẩn!", COLOR_GOOD)
             world = world_of(self.level.id)
             flags = star_flags(result, self.level.id)
             summary = apply_win(self.progress, self.level, world.levels, world.number, flags, result.chests_opened)
@@ -937,6 +971,8 @@ class App:
         theme_label = self.font_small.render(f"Bản đồ: {theme.name}", True, COLOR_MUTED)
         self.screen.blit(theme_label, theme_label.get_rect(bottomright=(VIEW_RECT.right - 14, VIEW_RECT.bottom - 8)))
         self.draw_map()
+        if self.hidden_shown:
+            self._draw_hidden_banner()
         self.draw_hearts()
         self.draw_star_goals()
         if self.show_win:
@@ -957,10 +993,38 @@ class App:
             button.draw(self.screen, self.font_small if len(button.label) > 7 else self.font)
 
     def _map_origin(self) -> tuple[int, int]:
+        """Gốc toạ độ khi vẽ lên lớp bản đồ (lớp này sau đó được phóng to vào khung)."""
+        return 0, MAP_TOP_PAD
+
+    def _map_layout(self) -> tuple[float, pygame.Rect]:
+        """Tỉ lệ phóng và vị trí của lớp bản đồ trên màn hình - bản đồ nhỏ được phóng to cho dễ nhìn."""
         world = self.playback.terrain_world
-        origin_x = VIEW_RECT.x + (VIEW_RECT.width - world.width * TILE) // 2
-        origin_y = VIEW_RECT.y + (VIEW_RECT.height - world.height * TILE) // 2
-        return origin_x, origin_y
+        width, height = world.width * TILE, world.height * TILE + MAP_TOP_PAD
+        scale = min(MAP_AREA.width / width, MAP_AREA.height / height, MAP_MAX_SCALE)
+        rect = pygame.Rect(0, 0, round(width * scale), round(height * scale))
+        rect.center = MAP_AREA.center
+        return scale, rect
+
+    def _layer_to_screen(self, point: tuple[float, float]) -> tuple[int, int]:
+        scale, rect = self._map_layout()
+        return round(rect.x + point[0] * scale), round(rect.y + point[1] * scale)
+
+    def _map_effects(self) -> dict[str, pygame.Surface]:
+        if self._effects is None:
+            self._effects = {
+                "shadow": make_soft_ellipse((TILE * 2 // 3, TILE // 5), (0, 0, 0), 150),
+                "glow": make_soft_ellipse((TILE, TILE), (255, 240, 170), 90),
+                "wall_top": make_edge_shadow(TILE, TILE // 3, 120, vertical=True),
+                "wall_left": make_edge_shadow(TILE // 5, TILE, 80, vertical=False),
+                "vignette": make_vignette(VIEW_RECT.inflate(-4, -4).size),
+            }
+        return self._effects
+
+    def _draw_shadow(self, tile_x: float, tile_y: float) -> None:
+        shadow = self._map_effects()["shadow"]
+        origin_x, origin_y = self._map_origin()
+        center = (origin_x + tile_x * TILE + TILE // 2, origin_y + (tile_y + 1) * TILE - 5)
+        self.screen.blit(shadow, shadow.get_rect(center=(round(center[0]), round(center[1]))))
 
     def _frame(self, frames: list[pygame.Surface], fps: float = 12, time_value: float | None = None) -> pygame.Surface:
         moment = self.time if time_value is None else time_value
@@ -977,7 +1041,39 @@ class App:
 
     def draw_map(self) -> None:
         world = self.playback.terrain_world
+        layer_size = (world.width * TILE, world.height * TILE + MAP_TOP_PAD)
+        if self._map_layer is None or self._map_layer.get_size() != layer_size:
+            self._map_layer = pygame.Surface(layer_size, pygame.SRCALPHA)
+        self._map_layer.fill((0, 0, 0, 0))
+        screen = self.screen
+        self.screen = self._map_layer
+        try:
+            hero_rect = self._draw_map_layer()
+        finally:
+            self.screen = screen
+
+        _, rect = self._map_layout()
+        self.screen.blit(pygame.transform.scale(self._map_layer, rect.size), rect)
+        theme = theme_for_world(world_of(self.level.id).number)
+        draw_ambient(self.screen, VIEW_RECT.inflate(-4, -4), theme.ambient, self.time)
+        self.screen.blit(self._map_effects()["vignette"], VIEW_RECT.inflate(-4, -4).topleft)
+
         playback = self.playback
+        if playback.bubble:
+            self.draw_bubble(playback.bubble[0], self._layer_to_screen(hero_rect.midtop))
+        origin_x, origin_y = self._map_origin()
+        for text, color, position, remaining in playback.floaters:
+            rendered = self.font_bold.render(text, True, color)
+            rendered.set_alpha(int(255 * min(1.0, remaining * 1.5)))
+            rise = (1.0 - remaining) * 30
+            anchor = self._layer_to_screen((origin_x + position.x * TILE + TILE // 2, origin_y + position.y * TILE))
+            self.screen.blit(rendered, rendered.get_rect(center=(anchor[0], anchor[1] - rise)))
+
+    def _draw_map_layer(self) -> pygame.Rect:
+        """Vẽ ô gạch, vật thể và nhân vật lên lớp bản đồ; trả về khung của nhân vật."""
+        world = self.playback.terrain_world
+        playback = self.playback
+        effects = self._map_effects()
         origin_x, origin_y = self._map_origin()
         floor_tile, wall_tile = self.assets.theme_tiles(theme_for_world(world_of(self.level.id).number))
 
@@ -988,13 +1084,24 @@ class App:
                 continue
             if terrain == "wall":
                 self.screen.blit(wall_tile, screen_position)
-            else:
-                self.screen.blit(floor_tile, screen_position)
+                continue
+            self.screen.blit(floor_tile, screen_position)
+            # Tường đổ bóng xuống sàn bên dưới và sang sàn bên phải: bản đồ có chiều sâu.
+            if world.terrain.get((x, y - 1)) == "wall":
+                self.screen.blit(effects["wall_top"], screen_position)
+            if world.terrain.get((x - 1, y)) == "wall":
+                self.screen.blit(effects["wall_left"], screen_position)
 
         for (x, y), terrain in world.terrain.items():
             if terrain == "spike":
                 self._blit_on_tile(self.assets.spike, x, y)
             elif terrain == "exit":
+                pulse = 1.2 + 0.2 * math.sin(self.time * 3)
+                glow = effects["glow"]
+                halo = pygame.transform.smoothscale(glow, (round(glow.get_width() * pulse), round(glow.get_height() * pulse)))
+                center = (origin_x + x * TILE + TILE // 2, origin_y + y * TILE + TILE // 3)
+                self.screen.blit(halo, halo.get_rect(center=center))
+                self._draw_shadow(x, y)
                 self._blit_on_tile(self._frame(self.assets.trophy, 8), x, y)
 
         for (x, y), kind in playback.doors.items():
@@ -1003,6 +1110,7 @@ class App:
             self.screen.blit(image, (origin_x + x * TILE + shake, origin_y + y * TILE))
 
         for (x, y), has_gem in playback.crates.items():
+            self._draw_shadow(x, y)
             self._blit_on_tile(self.assets.crates[2 if has_gem else 1]["idle"][0], x, y)
         for (x, y), (has_gem, remaining) in playback.breaking.items():
             image = self.assets.crates[2 if has_gem else 1]["break"][0].copy()
@@ -1017,11 +1125,16 @@ class App:
             draw_key(self.screen, (origin_x + x * TILE + TILE // 2, origin_y + y * TILE + TILE // 2 + bob), 12)
 
         for (x, y), color in playback.gems.items():
+            glow = effects["glow"]
+            gem_center = (origin_x + x * TILE + TILE // 2, origin_y + y * TILE + TILE // 2)
+            self.screen.blit(glow, glow.get_rect(center=gem_center))
+            self._draw_shadow(x, y)
             bob = 3 * pygame.math.Vector2(0, 1).rotate(self.time * 180 + x * 40).y
             rect = self._blit_on_tile(self._frame(self.assets.gems[color], 10), x, y - 0.15)
             rect.y += int(bob)
 
         for (x, y), kind in playback.enemies.items():
+            self._draw_shadow(x, y)
             frames = self.assets.enemies[kind]["hit" if (x, y) in playback.enemy_flash else "idle"]
             self._blit_on_tile(self._frame(frames, 10), x, y, flip=kind != "duck")
 
@@ -1035,21 +1148,10 @@ class App:
         if playback.dead:
             hero_image = hero_image.copy()
             hero_image.set_alpha(140)
-        hero_rect = self._blit_on_tile(
+        self._draw_shadow(playback.hero_position.x, playback.hero_position.y)
+        return self._blit_on_tile(
             hero_image, playback.hero_position.x, playback.hero_position.y, flip=playback.facing == "left"
         )
-
-        if playback.bubble:
-            self.draw_bubble(playback.bubble[0], hero_rect.midtop)
-
-        for text, color, position, remaining in playback.floaters:
-            rendered = self.font_bold.render(text, True, color)
-            rendered.set_alpha(int(255 * min(1.0, remaining * 1.5)))
-            rise = (1.0 - remaining) * 30
-            self.screen.blit(
-                rendered,
-                rendered.get_rect(center=(origin_x + position.x * TILE + TILE // 2, origin_y + position.y * TILE - rise)),
-            )
 
     def draw_bubble(self, text: str, anchor: tuple[int, int]) -> None:
         lines = wrap_text(text, self.font_bubble, 220)
@@ -1066,6 +1168,12 @@ class App:
         for index, line in enumerate(lines):
             rendered = self.font_bubble.render(line, True, (30, 30, 40))
             self.screen.blit(rendered, (rect.x + 10, rect.y + 6 + index * 20))
+
+    def _draw_hidden_banner(self) -> None:
+        text = self.font_bold.render(f"BẢN ĐỒ KIỂM TRA ẨN {self.hidden_shown}", True, (20, 20, 30))
+        banner = text.get_rect(midtop=(VIEW_RECT.centerx, VIEW_RECT.y + 44)).inflate(28, 10)
+        pygame.draw.rect(self.screen, COLOR_ACCENT, banner, border_radius=8)
+        self.screen.blit(text, text.get_rect(center=banner.center))
 
     def draw_hearts(self) -> None:
         for index in range(self.playback.max_hp):
@@ -1173,6 +1281,10 @@ class App:
         if self.level.requires:
             requirement = "Bắt buộc dùng: " + ", ".join(requirement_label(item) for item in self.level.requires)
             self.screen.blit(self.font_small.render(requirement, True, COLOR_MUTED), (x, INFO_RECT.bottom - 26))
+        hidden_count = len(hidden_levels(self.level))
+        if hidden_count:
+            note = f"+ {hidden_count} bản đồ kiểm tra ẩn: code phải đúng cả khi bản đồ / dữ liệu thay đổi"
+            self.screen.blit(self.font_small.render(note, True, COLOR_INFO), (x, INFO_RECT.bottom - 48))
 
 
 def main() -> None:

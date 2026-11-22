@@ -95,3 +95,17 @@ def test_every_hero_and_theme_renders(app):
     for theme in THEMES:
         floor, wall = app.assets.theme_tiles(theme)
         assert floor.get_size() == wall.get_size()
+
+
+def test_hidden_map_is_replayed_after_main_map(app):
+    level = next(lv for lv in app.levels if lv.id == "4-3")
+    play(app, level, "count = 0\nwhile count < 12:\n    hero.move_right()\n    count += 1\n")
+    assert app.hidden_shown == 1
+    for _ in range(2400):
+        app.update(1 / 30)
+        if app.playback.finished:
+            break
+    app.draw()
+    assert not app.show_win
+    app.run()
+    assert app.hidden_shown == 0

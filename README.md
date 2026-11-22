@@ -12,6 +12,8 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
 - **Lý thuyết đi kèm từng màn**: khái niệm, đề bài, dữ liệu có sẵn, giải thích từng dòng code ban đầu,
   ví dụ minh hoạ (khác lời giải) và các lỗi hay gặp.
 - **Tự suy nghĩ**: game không hiện lời giải; nút Gợi ý chỉ gợi hướng.
+- **Bản đồ kiểm tra ẩn**: nhiều màn chạy thêm code trên bản đồ dài hơn hoặc dữ liệu khác;
+  code "gõ cứng" (đếm ô, gõ thẳng đáp án) sẽ bị phát hiện, và game diễn lại bản đồ ẩn để em thấy sai ở đâu.
 - **Thân thiện với học sinh Việt Nam**: lời giải thích bằng tiếng Việt, bộ gõ Telex có sẵn
   (chỉ hoạt động trong dấu nháy và ghi chú nên không làm hỏng code).
 - **Khung code dễ dùng**: gõ vài chữ đầu là hiện **gợi ý lệnh** kèm giải thích (Tab / Enter để chọn,
@@ -107,6 +109,8 @@ Python 3.14 dùng `pygame-ce` (bản `pygame` gốc chưa có wheel cho 3.14).
 python -m pytest          # kiểm tra bản đồ, code ban đầu, lý thuyết (+ lời giải nếu có solutions/)
 python build_exe.py       # đóng gói release/OneSpace-CodeQuest-v…-Windows.zip
 python merge_single_file.py   # gộp toàn bộ code thành codequest_full.py
+python make_par.py        # (máy giáo viên) tính số dòng cho sao "code gọn"
+python make_variants.py   # (máy giáo viên) sinh bản đồ kiểm tra ẩn từ lời giải mẫu
 ```
 
 **Lời giải mẫu không có trong repo công khai và không có trong bản `.exe`.**

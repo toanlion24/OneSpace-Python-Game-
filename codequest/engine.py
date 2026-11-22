@@ -8,12 +8,15 @@ is recorded as an event; the UI then replays the events as an animation.
 from __future__ import annotations
 
 import ast
+import copy
 import sys
 import time
 import traceback
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
+
+from .variants import VARIANTS
 
 DIRECTIONS: dict[str, tuple[int, int]] = {
     "up": (0, -1),
@@ -112,6 +115,49 @@ class RunResult:
     damage_taken: int = 0
     code_lines: int = 0
     chests_opened: int = 0
+    # Bản đồ kiểm tra ẩn: số bản đồ đã vượt, hoặc bản đồ đầu tiên bị sai.
+    hidden_passed: int = 0
+    hidden_failure: HiddenFailure | None = None
+
+
+@dataclass
+class HiddenFailure:
+    """Code thắng ở bản đồ chính nhưng thua ở một bản đồ kiểm tra ẩn."""
+
+    index: int
+    level: Level
+    events: list[dict[str, Any]]
+    reason: str
+    error_line: int | None
+    changed_data: dict[str, Any]
+
+
+def hidden_levels(level: Level) -> list[tuple[Level, dict[str, Any]]]:
+    """Các bản đồ kiểm tra ẩn của màn: (màn biến thể, dữ liệu đã đổi)."""
+    variants = []
+    for variant in VARIANTS.get(level.id, []):
+        changes: dict[str, Any] = {}
+        if "rows" in variant:
+            changes["rows"] = list(variant["rows"])
+        changed_data: dict[str, Any] = {}
+        if "extra_globals" in variant:
+            changes["extra_globals"] = {**level.extra_globals, **variant["extra_globals"]}
+            changed_data = dict(variant["extra_globals"])
+        if "door_code" in variant:
+            changes["door_code"] = variant["door_code"]
+        variants.append((replace(level, **changes), changed_data))
+    return variants
+
+
+def describe_hidden_failure(failure: HiddenFailure) -> str:
+    message = f"Code đúng ở bản đồ này nhưng SAI ở bản đồ kiểm tra ẩn {failure.index}: {failure.reason}"
+    if failure.changed_data:
+        shown = ", ".join(f"{name} = {value!r}" for name, value in failure.changed_data.items())
+        return f"{message} Ở bản đồ ẩn, dữ liệu khác đi: {shown}. Đừng gõ thẳng đáp án - hãy tính từ biến."
+    return (
+        f"{message} Bản đồ ẩn dài / rộng hơn một chút: đừng đếm số ô cố định, "
+        "hãy dùng vòng lặp với hero.look(...), find_gems(), exit_position..."
+    )
 
 
 def upgrades_apply(level: Level) -> bool:
@@ -927,24 +973,44 @@ def explain_syntax_error(exc: SyntaxError) -> str:
     return f"Dòng {line}: Sai cú pháp ({exc.msg}). Kiểm tra dấu ngoặc, dấu hai chấm, dấu nháy."
 
 
-def run_code(level: Level, source: str, bonus_hp: int = 0, shield: bool = False) -> RunResult:
-    """Run the player's code against a fresh world and judge the outcome."""
-    world = World(level, bonus_hp, shield)
+def run_code(
+    level: Level, source: str, bonus_hp: int = 0, shield: bool = False, check_hidden: bool = True
+) -> RunResult:
+    """Run the player's code against the level, then against its hidden test maps."""
     lines = count_code_lines(source)
-
     try:
         tree = ast.parse(source, CODE_FILENAME)
         code = compile(tree, CODE_FILENAME, "exec")
     except SyntaxError as exc:
         return RunResult([], False, explain_syntax_error(exc), exc.lineno, 0, lines)
 
+    result = _run_compiled(level, code, tree, lines, bonus_hp, shield)
+    if not result.won or not check_hidden:
+        return result
+    for index, (hidden_level, changed_data) in enumerate(hidden_levels(level), start=1):
+        hidden = _run_compiled(hidden_level, code, tree, lines, bonus_hp, shield)
+        if not hidden.won:
+            failure = HiddenFailure(index, hidden_level, hidden.events, hidden.message, hidden.error_line, changed_data)
+            result.won = False
+            result.message = describe_hidden_failure(failure)
+            result.hidden_failure = failure
+            return result
+        result.hidden_passed = index
+    return result
+
+
+def _run_compiled(
+    level: Level, code: Any, tree: ast.AST, lines: int, bonus_hp: int, shield: bool
+) -> RunResult:
+    world = World(level, bonus_hp, shield)
     namespace: dict[str, Any] = {
         "__builtins__": _safe_builtins(world),
         "__name__": "__main__",
         "hero": HeroAPI(world),
         "DoorJammed": DoorJammed,
     }
-    namespace.update(level.extra_globals)
+    # Bản sao riêng để code của lần chạy trước không làm đổi dữ liệu của màn.
+    namespace.update(copy.deepcopy(level.extra_globals))
 
     traced_lines = 0
     deadline = time.monotonic() + MAX_RUN_SECONDS

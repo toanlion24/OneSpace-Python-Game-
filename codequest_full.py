@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import colorsys
+import copy
 import ctypes
 import json
 import keyword
@@ -21,7 +22,7 @@ import time
 import traceback
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -214,6 +215,53 @@ def is_word_char(char: str) -> bool:
 
 
 # ======================================================================
+# variants.py
+# ======================================================================
+
+VARIANTS: dict[str, list[dict[str, Any]]] = {'4-3': [{'rows': ['################', '#@.G.G..G.G...E#', '################']}],
+ '5-1': [{'extra_globals': {'secret': '75'}, 'door_code': 75}],
+ '5-2': [{'extra_globals': {'a': '45', 'b': '63'}, 'door_code': 108}],
+ '5-4': [{'extra_globals': {'room': 10}, 'door_code': 'Phòng 10'}],
+ '6-3': [{'extra_globals': {'base': 24}, 'door_code': 48}],
+ '7-1': [{'extra_globals': {'scroll': 'abc75xyz'}, 'door_code': 75}],
+ '7-6': [{'extra_globals': {'note': 'Mật mã ở cuối thư: 75'}, 'door_code': 75}],
+ '8-1': [{'rows': ['############', '#@.G##...G.#', '#.##..#.##.#', '#..G..G...E#', '############']}],
+ '8-2': [{'rows': ['#############', '#@..r.......#', '#.r......r..#', '#..........E#', '#############']}],
+ '8-6': [{'rows': ['##########', '#@..Q....#', '#........#', '#..Q...O.#', '#.......E#', '##########']}],
+ '9-1': [{'rows': ['############', '#@..r...b..#', '#..........#', '#....c....E#', '############']}],
+ '9-3': [{'extra_globals': {'prices': {'táo': 8, 'cam': 10, 'lê': 7}}, 'door_code': 23}],
+ '10-3': [{'extra_globals': {'numbers': [4, 5, 6, 7]}, 'door_code': 126}],
+ '10-4': [{'extra_globals': {'table': [[4, 5], [6, 7], [8, 9]]}, 'door_code': 39}],
+ '10-5': [{'rows': ['##########', '#@..##..G#', '#.#....#.#', '#G..##..E#', '##########']}],
+ '10-6': [{'rows': ['##########', '#.C..C.C.#', '#@.......#', '#.......E#', '##########']}],
+ '11-6': [{'rows': ['###########', '#@.O..QO.E#', '###########']}],
+ '12-1': [{'extra_globals': {'a': 9, 'b': 11}, 'door_code': 14}],
+ '12-2': [{'extra_globals': {'candies': 87, 'cakes': 39}, 'door_code': 3}],
+ '12-4': [{'extra_globals': {'r': 8}, 'door_code': 201}],
+ '13-5': [{'extra_globals': {'coins': [4, 5, 8, 13]}, 'door_code': 6}],
+ '14-5': [{'extra_globals': {'scores': [8, 11, 5, 12, 7]}, 'door_code': 24}],
+ '16-3': [{'extra_globals': {'candidates': ['0x', '??', '75', 'abc']}, 'door_code': 75}],
+ '16-4': [{'extra_globals': {'pairs': [(13, 5), (8, 3), (12, 6)]}, 'door_code': 6}],
+ '17-4': [{'extra_globals': {'coins': [8, 13, 5]}, 'door_code': 26}],
+ '18-3': [{'extra_globals': {'scroll': 'x0y6z2'}, 'door_code': 8}],
+ '18-5': [{'extra_globals': {'candidates': ['7', 'x', '7', '0', '??', '5']}, 'door_code': 12}],
+ '18-6': [{'rows': ['##############', '#@.O.k..r.L.E#', '###########C##']}],
+ '19-1': [{'extra_globals': {'raw': ['6', 'x', '8', '?', '0']}, 'door_code': 14}],
+ '19-2': [{'rows': ['############', '#@.r..b.c..#', '#..........#', '#.........E#', '############']}],
+ '19-6': [{'rows': ['##########', '#C...C..C#', '#........#', '#@......E#', '##########']}],
+ '20-1': [{'extra_globals': {'letter': 'Kho báu ở phòng 45. Mật mã là 7530, đừng nhầm với 22!'},
+           'door_code': 7530}],
+ '20-3': [{'extra_globals': {'letter': 'Ngọc: 6 đỏ, 8 xanh, 5 vàng'}, 'door_code': 19}],
+ '20-6': [{'extra_globals': {'letter': 'Rương ở hướng up, cửa mã 0647.'}, 'door_code': 647}],
+ '22-1': [{'extra_globals': {'scores': [[4, 5, 6], [7, 8, 9]]}, 'door_code': 39}],
+ '22-2': [{'extra_globals': {'matrix_a': [[4, 5], [6, 7]], 'matrix_b': [[5, 3], [4, 5]]}, 'door_code': 188}],
+ '22-3': [{'extra_globals': {'temps': [23, 25, 27, 29, 31]}, 'door_code': 27}],
+ '22-4': [{'extra_globals': {'scores': [6, 10, 11, 5, 12, 9]}, 'door_code': 5}],
+ '22-6': [{'extra_globals': {'weights': [[6, 11], [9, 5]]}, 'door_code': 11}],
+ '23-2': [{'rows': ['############', '#@..r...b..#', '#..........#', '#....c....E#', '############']}]}
+
+
+# ======================================================================
 # engine.py
 # ======================================================================
 
@@ -314,6 +362,49 @@ class RunResult:
     damage_taken: int = 0
     code_lines: int = 0
     chests_opened: int = 0
+    # Bản đồ kiểm tra ẩn: số bản đồ đã vượt, hoặc bản đồ đầu tiên bị sai.
+    hidden_passed: int = 0
+    hidden_failure: HiddenFailure | None = None
+
+
+@dataclass
+class HiddenFailure:
+    """Code thắng ở bản đồ chính nhưng thua ở một bản đồ kiểm tra ẩn."""
+
+    index: int
+    level: Level
+    events: list[dict[str, Any]]
+    reason: str
+    error_line: int | None
+    changed_data: dict[str, Any]
+
+
+def hidden_levels(level: Level) -> list[tuple[Level, dict[str, Any]]]:
+    """Các bản đồ kiểm tra ẩn của màn: (màn biến thể, dữ liệu đã đổi)."""
+    variants = []
+    for variant in VARIANTS.get(level.id, []):
+        changes: dict[str, Any] = {}
+        if "rows" in variant:
+            changes["rows"] = list(variant["rows"])
+        changed_data: dict[str, Any] = {}
+        if "extra_globals" in variant:
+            changes["extra_globals"] = {**level.extra_globals, **variant["extra_globals"]}
+            changed_data = dict(variant["extra_globals"])
+        if "door_code" in variant:
+            changes["door_code"] = variant["door_code"]
+        variants.append((replace(level, **changes), changed_data))
+    return variants
+
+
+def describe_hidden_failure(failure: HiddenFailure) -> str:
+    message = f"Code đúng ở bản đồ này nhưng SAI ở bản đồ kiểm tra ẩn {failure.index}: {failure.reason}"
+    if failure.changed_data:
+        shown = ", ".join(f"{name} = {value!r}" for name, value in failure.changed_data.items())
+        return f"{message} Ở bản đồ ẩn, dữ liệu khác đi: {shown}. Đừng gõ thẳng đáp án - hãy tính từ biến."
+    return (
+        f"{message} Bản đồ ẩn dài / rộng hơn một chút: đừng đếm số ô cố định, "
+        "hãy dùng vòng lặp với hero.look(...), find_gems(), exit_position..."
+    )
 
 
 def upgrades_apply(level: Level) -> bool:
@@ -1129,24 +1220,44 @@ def explain_syntax_error(exc: SyntaxError) -> str:
     return f"Dòng {line}: Sai cú pháp ({exc.msg}). Kiểm tra dấu ngoặc, dấu hai chấm, dấu nháy."
 
 
-def run_code(level: Level, source: str, bonus_hp: int = 0, shield: bool = False) -> RunResult:
-    """Run the player's code against a fresh world and judge the outcome."""
-    world = World(level, bonus_hp, shield)
+def run_code(
+    level: Level, source: str, bonus_hp: int = 0, shield: bool = False, check_hidden: bool = True
+) -> RunResult:
+    """Run the player's code against the level, then against its hidden test maps."""
     lines = count_code_lines(source)
-
     try:
         tree = ast.parse(source, CODE_FILENAME)
         code = compile(tree, CODE_FILENAME, "exec")
     except SyntaxError as exc:
         return RunResult([], False, explain_syntax_error(exc), exc.lineno, 0, lines)
 
+    result = _run_compiled(level, code, tree, lines, bonus_hp, shield)
+    if not result.won or not check_hidden:
+        return result
+    for index, (hidden_level, changed_data) in enumerate(hidden_levels(level), start=1):
+        hidden = _run_compiled(hidden_level, code, tree, lines, bonus_hp, shield)
+        if not hidden.won:
+            failure = HiddenFailure(index, hidden_level, hidden.events, hidden.message, hidden.error_line, changed_data)
+            result.won = False
+            result.message = describe_hidden_failure(failure)
+            result.hidden_failure = failure
+            return result
+        result.hidden_passed = index
+    return result
+
+
+def _run_compiled(
+    level: Level, code: Any, tree: ast.AST, lines: int, bonus_hp: int, shield: bool
+) -> RunResult:
+    world = World(level, bonus_hp, shield)
     namespace: dict[str, Any] = {
         "__builtins__": _safe_builtins(world),
         "__name__": "__main__",
         "hero": HeroAPI(world),
         "DoorJammed": DoorJammed,
     }
-    namespace.update(level.extra_globals)
+    # Bản sao riêng để code của lần chạy trước không làm đổi dữ liệu của màn.
+    namespace.update(copy.deepcopy(level.extra_globals))
 
     traced_lines = 0
     deadline = time.monotonic() + MAX_RUN_SECONDS
@@ -7092,22 +7203,24 @@ class MapTheme:
     add: Color = NO_ADD
     # Màu nền khung bản đồ (phía sau ô gạch).
     backdrop: Color = (24, 28, 40)
+    # Hiệu ứng không khí: "snow", "dust", "fireflies", "sparkle", "leaves" hoặc "" (không có).
+    ambient: str = ""
 
 
 THEMES: list[MapTheme] = [
-    MapTheme("Sân gạch", floor=(1, 1), wall=(1, 4)),
-    MapTheme("Đồi đất đỏ", floor=(7, 1), wall=(7, 8), backdrop=(40, 26, 22)),
+    MapTheme("Sân gạch", floor=(1, 1), wall=(1, 4), ambient="leaves"),
+    MapTheme("Đồi đất đỏ", floor=(7, 1), wall=(7, 8), backdrop=(40, 26, 22), ambient="dust"),
     MapTheme("Rừng rêu", floor=(1, 1), wall=(1, 5), floor_multiply=(170, 220, 150), wall_multiply=(150, 205, 140),
-             backdrop=(20, 36, 26)),
+             backdrop=(20, 36, 26), ambient="fireflies"),
     MapTheme("Phòng thép", floor=(12, 1), wall=(1, 5), backdrop=(30, 34, 44)),
     MapTheme("Sa mạc", floor=(7, 1), wall=(7, 8), floor_multiply=(255, 225, 150), wall_multiply=(255, 220, 160),
-             add=(50, 40, 10), backdrop=(52, 42, 24)),
+             add=(50, 40, 10), backdrop=(52, 42, 24), ambient="dust"),
     MapTheme("Băng tuyết", floor=(12, 1), wall=(1, 4), floor_multiply=(210, 235, 255), wall_multiply=(170, 210, 255),
-             add=(20, 26, 36), backdrop=(26, 36, 52)),
+             add=(20, 26, 36), backdrop=(26, 36, 52), ambient="snow"),
     MapTheme("Lâu đài tím", floor=(12, 1), wall=(1, 4), floor_multiply=(225, 205, 255), wall_multiply=(190, 150, 255),
-             backdrop=(30, 20, 44)),
+             backdrop=(30, 20, 44), ambient="sparkle"),
     MapTheme("Hang đêm", floor=(1, 1), wall=(1, 4), floor_multiply=(120, 120, 190), wall_multiply=(110, 110, 160),
-             backdrop=(12, 12, 24)),
+             backdrop=(12, 12, 24), ambient="fireflies"),
 ]
 
 # World -> kiểu bản đồ: mỗi giai đoạn đổi cảnh, các World liền nhau không trùng kiểu.
@@ -8853,6 +8966,99 @@ def draw_chest(surface: pygame.Surface, rect: pygame.Rect, opened: bool, time_va
         pygame.draw.rect(surface, GOLD_DARK, (base.centerx - 5, base.y - 3, 10, 8), border_radius=2)
 
 
+# ---------------------------------------------------------------- map atmosphere
+AMBIENT_SEEDS = [
+    (random.Random(index).random(), random.Random(index * 7 + 3).random(), random.Random(index * 13 + 5).random())
+    for index in range(48)
+]
+
+
+def draw_ambient(surface: pygame.Surface, area: pygame.Rect, kind: str, time_value: float) -> None:
+    """Hạt không khí theo kiểu bản đồ (tuyết, bụi, đom đóm...), tính thẳng từ thời gian - không cần lưu trạng thái."""
+    if not kind:
+        return
+    previous_clip = surface.get_clip()
+    surface.set_clip(area)
+    for seed_x, seed_y, seed_speed in AMBIENT_SEEDS:
+        if kind == "snow":
+            speed = 18 + 30 * seed_speed
+            x = area.x + (seed_x * area.width + 14 * math.sin(time_value * 1.3 + seed_y * 9)) % area.width
+            y = area.y + (seed_y * area.height + time_value * speed) % area.height
+            pygame.draw.circle(surface, (235, 245, 255), (int(x), int(y)), 2 if seed_speed > 0.5 else 1)
+        elif kind == "dust":
+            speed = 12 + 22 * seed_speed
+            x = area.x + (seed_x * area.width + time_value * speed) % area.width
+            y = area.y + (seed_y * area.height + 6 * math.sin(time_value + seed_x * 7)) % area.height
+            dot = pygame.Surface((3, 3), pygame.SRCALPHA)
+            dot.fill((240, 210, 150, 110))
+            surface.blit(dot, (int(x), int(y)))
+        elif kind == "leaves":
+            if seed_speed < 0.6:
+                continue
+            speed = 16 + 18 * seed_speed
+            x = area.x + (seed_x * area.width + time_value * speed * 0.6) % area.width
+            y = area.y + (seed_y * area.height + time_value * speed) % area.height
+            sway = math.sin(time_value * 2 + seed_x * 11)
+            pygame.draw.ellipse(surface, (110, 190, 90), (int(x + 6 * sway), int(y), 6, 3))
+        elif kind == "fireflies":
+            if seed_speed < 0.45:
+                continue
+            x = area.x + seed_x * area.width + 22 * math.sin(time_value * 0.7 + seed_y * 13)
+            y = area.y + seed_y * area.height + 16 * math.cos(time_value * 0.9 + seed_x * 17)
+            glow = 0.5 + 0.5 * math.sin(time_value * 3 + seed_speed * 20)
+            halo = pygame.Surface((14, 14), pygame.SRCALPHA)
+            pygame.draw.circle(halo, (200, 255, 120, int(70 * glow)), (7, 7), 7)
+            surface.blit(halo, (int(x) - 7, int(y) - 7))
+            pygame.draw.circle(surface, (230, 255, 160), (int(x), int(y)), 1 + int(glow + 0.5))
+        elif kind == "sparkle":
+            twinkle = math.sin(time_value * 2.5 + seed_speed * 30)
+            if twinkle < 0.3:
+                continue
+            x = area.x + seed_x * area.width
+            y = area.y + seed_y * area.height
+            size = int(2 + 3 * twinkle)
+            color = (230, 200, 255)
+            pygame.draw.line(surface, color, (x - size, y), (x + size, y))
+            pygame.draw.line(surface, color, (x, y - size), (x, y + size))
+    surface.set_clip(previous_clip)
+
+
+def make_vignette(size: tuple[int, int], strength: int = 120) -> pygame.Surface:
+    """Viền tối mềm quanh khung bản đồ để mắt tập trung vào giữa."""
+    small = pygame.Surface((40, 24), pygame.SRCALPHA)
+    for x in range(40):
+        for y in range(24):
+            distance = math.hypot((x - 19.5) / 19.5, (y - 11.5) / 11.5) / math.sqrt(2)
+            alpha = int(strength * max(0.0, distance - 0.35) / 0.65) if distance > 0.35 else 0
+            small.set_at((x, y), (0, 0, 0, min(255, alpha)))
+    return pygame.transform.smoothscale(small, size)
+
+
+def make_soft_ellipse(size: tuple[int, int], color: tuple[int, int, int], alpha: int) -> pygame.Surface:
+    """Hình elip mờ dần ra mép (bóng đổ, quầng sáng)."""
+    surface = pygame.Surface(size, pygame.SRCALPHA)
+    steps = 6
+    for step in range(steps):
+        fraction = 1 - step / steps
+        rect = pygame.Rect(0, 0, int(size[0] * fraction), int(size[1] * fraction))
+        rect.center = (size[0] // 2, size[1] // 2)
+        pygame.draw.ellipse(surface, (*color, alpha // steps), rect)
+    return surface
+
+
+def make_edge_shadow(width: int, height: int, alpha: int, vertical: bool) -> pygame.Surface:
+    """Dải bóng mờ dần: tường đổ bóng xuống sàn."""
+    surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    length = height if vertical else width
+    for index in range(length):
+        value = int(alpha * (1 - index / length) ** 2)
+        if vertical:
+            pygame.draw.line(surface, (0, 0, 0, value), (0, index), (width - 1, index))
+        else:
+            pygame.draw.line(surface, (0, 0, 0, value), (index, 0), (index, height - 1))
+    return surface
+
+
 # ======================================================================
 # sound.py
 # ======================================================================
@@ -9400,6 +9606,11 @@ FPS = 60
 PROGRESS_FILE = user_data_dir() / "progress.json"
 
 VIEW_RECT = pygame.Rect(16, 64, 736, 440)
+# Vùng vẽ bản đồ trong khung (chừa chỗ cho tim / sao ở trên và tên bản đồ ở dưới).
+MAP_AREA = pygame.Rect(VIEW_RECT.x + 16, VIEW_RECT.y + 40, VIEW_RECT.width - 32, VIEW_RECT.height - 70)
+MAP_MAX_SCALE = 2.0
+# Chừa một hàng phía trên cho nhân vật / cúp cao hơn một ô.
+MAP_TOP_PAD = 48
 CONSOLE_RECT = pygame.Rect(16, 516, 736, 188)
 THEORY_RECT = pygame.Rect(16, 64, 736, 640)
 MENU_LEFT = 64
@@ -9803,6 +10014,10 @@ class App:
         self.scene = "menu"
         self.level: Level = self.levels[0]
         self.playback = self._new_playback(self.level)
+        # Số thứ tự bản đồ kiểm tra ẩn đang được diễn lại (0 = bản đồ chính).
+        self.hidden_shown = 0
+        self._effects: dict[str, pygame.Surface] | None = None
+        self._map_layer: pygame.Surface | None = None
         self.console: list[tuple[str, tuple[int, int, int]]] = []
         self.hint_index = 0
         self.speed_options = [1.0, 2.0, 4.0]
@@ -9969,6 +10184,7 @@ class App:
         self.console = []
         self.hint_index = 0
         self.show_win = False
+        self.hidden_shown = 0
         self.log(f"Màn {level.id}: {level.title}", COLOR_ACCENT)
         self.log("Viết code bên phải rồi bấm Chạy (hoặc Ctrl+Enter).", COLOR_MUTED)
         self.log("Bộ gõ Telex có sẵn trong dấu nháy và ghi chú (F2 để bật/tắt).", COLOR_MUTED)
@@ -10016,10 +10232,17 @@ class App:
         bonus_hp, shield = self._upgrades()
         result = run_code(self.level, self.editor.text, bonus_hp, shield)
         self.editor.error_line = result.error_line
+        self._show_main_map()
         self.playback.start(result)
+
+    def _show_main_map(self) -> None:
+        if self.hidden_shown:
+            self.playback = self._new_playback(self.level)
+            self.hidden_shown = 0
 
     def reset_code(self) -> None:
         self.editor.set_text(self.level.starter)
+        self._show_main_map()
         self.playback.reset()
         self.console = []
         self.log("Đã khôi phục code ban đầu.", COLOR_MUTED)
@@ -10049,8 +10272,19 @@ class App:
         result = self.playback.result
         if result is None:
             return
+        failure = result.hidden_failure
+        if failure is not None and not self.hidden_shown:
+            self.log("Bản đồ chính: đi đúng!", COLOR_GOOD)
+            self.log(f"Thử tiếp code trên bản đồ kiểm tra ẩn {failure.index}...", COLOR_INFO)
+            self.hidden_shown = failure.index
+            self.playback = self._new_playback(failure.level)
+            self.playback.start(RunResult(failure.events, False, result.message, failure.error_line))
+            self.editor.error_line = failure.error_line
+            return
         if result.won:
             self.log("[OK] " + result.message, COLOR_GOOD)
+            if result.hidden_passed:
+                self.log(f"Code còn đúng trên cả {result.hidden_passed} bản đồ kiểm tra ẩn!", COLOR_GOOD)
             world = world_of(self.level.id)
             flags = star_flags(result, self.level.id)
             summary = apply_win(self.progress, self.level, world.levels, world.number, flags, result.chests_opened)
@@ -10269,6 +10503,8 @@ class App:
         theme_label = self.font_small.render(f"Bản đồ: {theme.name}", True, COLOR_MUTED)
         self.screen.blit(theme_label, theme_label.get_rect(bottomright=(VIEW_RECT.right - 14, VIEW_RECT.bottom - 8)))
         self.draw_map()
+        if self.hidden_shown:
+            self._draw_hidden_banner()
         self.draw_hearts()
         self.draw_star_goals()
         if self.show_win:
@@ -10289,10 +10525,38 @@ class App:
             button.draw(self.screen, self.font_small if len(button.label) > 7 else self.font)
 
     def _map_origin(self) -> tuple[int, int]:
+        """Gốc toạ độ khi vẽ lên lớp bản đồ (lớp này sau đó được phóng to vào khung)."""
+        return 0, MAP_TOP_PAD
+
+    def _map_layout(self) -> tuple[float, pygame.Rect]:
+        """Tỉ lệ phóng và vị trí của lớp bản đồ trên màn hình - bản đồ nhỏ được phóng to cho dễ nhìn."""
         world = self.playback.terrain_world
-        origin_x = VIEW_RECT.x + (VIEW_RECT.width - world.width * TILE) // 2
-        origin_y = VIEW_RECT.y + (VIEW_RECT.height - world.height * TILE) // 2
-        return origin_x, origin_y
+        width, height = world.width * TILE, world.height * TILE + MAP_TOP_PAD
+        scale = min(MAP_AREA.width / width, MAP_AREA.height / height, MAP_MAX_SCALE)
+        rect = pygame.Rect(0, 0, round(width * scale), round(height * scale))
+        rect.center = MAP_AREA.center
+        return scale, rect
+
+    def _layer_to_screen(self, point: tuple[float, float]) -> tuple[int, int]:
+        scale, rect = self._map_layout()
+        return round(rect.x + point[0] * scale), round(rect.y + point[1] * scale)
+
+    def _map_effects(self) -> dict[str, pygame.Surface]:
+        if self._effects is None:
+            self._effects = {
+                "shadow": make_soft_ellipse((TILE * 2 // 3, TILE // 5), (0, 0, 0), 150),
+                "glow": make_soft_ellipse((TILE, TILE), (255, 240, 170), 90),
+                "wall_top": make_edge_shadow(TILE, TILE // 3, 120, vertical=True),
+                "wall_left": make_edge_shadow(TILE // 5, TILE, 80, vertical=False),
+                "vignette": make_vignette(VIEW_RECT.inflate(-4, -4).size),
+            }
+        return self._effects
+
+    def _draw_shadow(self, tile_x: float, tile_y: float) -> None:
+        shadow = self._map_effects()["shadow"]
+        origin_x, origin_y = self._map_origin()
+        center = (origin_x + tile_x * TILE + TILE // 2, origin_y + (tile_y + 1) * TILE - 5)
+        self.screen.blit(shadow, shadow.get_rect(center=(round(center[0]), round(center[1]))))
 
     def _frame(self, frames: list[pygame.Surface], fps: float = 12, time_value: float | None = None) -> pygame.Surface:
         moment = self.time if time_value is None else time_value
@@ -10309,7 +10573,39 @@ class App:
 
     def draw_map(self) -> None:
         world = self.playback.terrain_world
+        layer_size = (world.width * TILE, world.height * TILE + MAP_TOP_PAD)
+        if self._map_layer is None or self._map_layer.get_size() != layer_size:
+            self._map_layer = pygame.Surface(layer_size, pygame.SRCALPHA)
+        self._map_layer.fill((0, 0, 0, 0))
+        screen = self.screen
+        self.screen = self._map_layer
+        try:
+            hero_rect = self._draw_map_layer()
+        finally:
+            self.screen = screen
+
+        _, rect = self._map_layout()
+        self.screen.blit(pygame.transform.scale(self._map_layer, rect.size), rect)
+        theme = theme_for_world(world_of(self.level.id).number)
+        draw_ambient(self.screen, VIEW_RECT.inflate(-4, -4), theme.ambient, self.time)
+        self.screen.blit(self._map_effects()["vignette"], VIEW_RECT.inflate(-4, -4).topleft)
+
         playback = self.playback
+        if playback.bubble:
+            self.draw_bubble(playback.bubble[0], self._layer_to_screen(hero_rect.midtop))
+        origin_x, origin_y = self._map_origin()
+        for text, color, position, remaining in playback.floaters:
+            rendered = self.font_bold.render(text, True, color)
+            rendered.set_alpha(int(255 * min(1.0, remaining * 1.5)))
+            rise = (1.0 - remaining) * 30
+            anchor = self._layer_to_screen((origin_x + position.x * TILE + TILE // 2, origin_y + position.y * TILE))
+            self.screen.blit(rendered, rendered.get_rect(center=(anchor[0], anchor[1] - rise)))
+
+    def _draw_map_layer(self) -> pygame.Rect:
+        """Vẽ ô gạch, vật thể và nhân vật lên lớp bản đồ; trả về khung của nhân vật."""
+        world = self.playback.terrain_world
+        playback = self.playback
+        effects = self._map_effects()
         origin_x, origin_y = self._map_origin()
         floor_tile, wall_tile = self.assets.theme_tiles(theme_for_world(world_of(self.level.id).number))
 
@@ -10320,13 +10616,24 @@ class App:
                 continue
             if terrain == "wall":
                 self.screen.blit(wall_tile, screen_position)
-            else:
-                self.screen.blit(floor_tile, screen_position)
+                continue
+            self.screen.blit(floor_tile, screen_position)
+            # Tường đổ bóng xuống sàn bên dưới và sang sàn bên phải: bản đồ có chiều sâu.
+            if world.terrain.get((x, y - 1)) == "wall":
+                self.screen.blit(effects["wall_top"], screen_position)
+            if world.terrain.get((x - 1, y)) == "wall":
+                self.screen.blit(effects["wall_left"], screen_position)
 
         for (x, y), terrain in world.terrain.items():
             if terrain == "spike":
                 self._blit_on_tile(self.assets.spike, x, y)
             elif terrain == "exit":
+                pulse = 1.2 + 0.2 * math.sin(self.time * 3)
+                glow = effects["glow"]
+                halo = pygame.transform.smoothscale(glow, (round(glow.get_width() * pulse), round(glow.get_height() * pulse)))
+                center = (origin_x + x * TILE + TILE // 2, origin_y + y * TILE + TILE // 3)
+                self.screen.blit(halo, halo.get_rect(center=center))
+                self._draw_shadow(x, y)
                 self._blit_on_tile(self._frame(self.assets.trophy, 8), x, y)
 
         for (x, y), kind in playback.doors.items():
@@ -10335,6 +10642,7 @@ class App:
             self.screen.blit(image, (origin_x + x * TILE + shake, origin_y + y * TILE))
 
         for (x, y), has_gem in playback.crates.items():
+            self._draw_shadow(x, y)
             self._blit_on_tile(self.assets.crates[2 if has_gem else 1]["idle"][0], x, y)
         for (x, y), (has_gem, remaining) in playback.breaking.items():
             image = self.assets.crates[2 if has_gem else 1]["break"][0].copy()
@@ -10349,11 +10657,16 @@ class App:
             draw_key(self.screen, (origin_x + x * TILE + TILE // 2, origin_y + y * TILE + TILE // 2 + bob), 12)
 
         for (x, y), color in playback.gems.items():
+            glow = effects["glow"]
+            gem_center = (origin_x + x * TILE + TILE // 2, origin_y + y * TILE + TILE // 2)
+            self.screen.blit(glow, glow.get_rect(center=gem_center))
+            self._draw_shadow(x, y)
             bob = 3 * pygame.math.Vector2(0, 1).rotate(self.time * 180 + x * 40).y
             rect = self._blit_on_tile(self._frame(self.assets.gems[color], 10), x, y - 0.15)
             rect.y += int(bob)
 
         for (x, y), kind in playback.enemies.items():
+            self._draw_shadow(x, y)
             frames = self.assets.enemies[kind]["hit" if (x, y) in playback.enemy_flash else "idle"]
             self._blit_on_tile(self._frame(frames, 10), x, y, flip=kind != "duck")
 
@@ -10367,21 +10680,10 @@ class App:
         if playback.dead:
             hero_image = hero_image.copy()
             hero_image.set_alpha(140)
-        hero_rect = self._blit_on_tile(
+        self._draw_shadow(playback.hero_position.x, playback.hero_position.y)
+        return self._blit_on_tile(
             hero_image, playback.hero_position.x, playback.hero_position.y, flip=playback.facing == "left"
         )
-
-        if playback.bubble:
-            self.draw_bubble(playback.bubble[0], hero_rect.midtop)
-
-        for text, color, position, remaining in playback.floaters:
-            rendered = self.font_bold.render(text, True, color)
-            rendered.set_alpha(int(255 * min(1.0, remaining * 1.5)))
-            rise = (1.0 - remaining) * 30
-            self.screen.blit(
-                rendered,
-                rendered.get_rect(center=(origin_x + position.x * TILE + TILE // 2, origin_y + position.y * TILE - rise)),
-            )
 
     def draw_bubble(self, text: str, anchor: tuple[int, int]) -> None:
         lines = wrap_text(text, self.font_bubble, 220)
@@ -10398,6 +10700,12 @@ class App:
         for index, line in enumerate(lines):
             rendered = self.font_bubble.render(line, True, (30, 30, 40))
             self.screen.blit(rendered, (rect.x + 10, rect.y + 6 + index * 20))
+
+    def _draw_hidden_banner(self) -> None:
+        text = self.font_bold.render(f"BẢN ĐỒ KIỂM TRA ẨN {self.hidden_shown}", True, (20, 20, 30))
+        banner = text.get_rect(midtop=(VIEW_RECT.centerx, VIEW_RECT.y + 44)).inflate(28, 10)
+        pygame.draw.rect(self.screen, COLOR_ACCENT, banner, border_radius=8)
+        self.screen.blit(text, text.get_rect(center=banner.center))
 
     def draw_hearts(self) -> None:
         for index in range(self.playback.max_hp):
@@ -10505,6 +10813,10 @@ class App:
         if self.level.requires:
             requirement = "Bắt buộc dùng: " + ", ".join(requirement_label(item) for item in self.level.requires)
             self.screen.blit(self.font_small.render(requirement, True, COLOR_MUTED), (x, INFO_RECT.bottom - 26))
+        hidden_count = len(hidden_levels(self.level))
+        if hidden_count:
+            note = f"+ {hidden_count} bản đồ kiểm tra ẩn: code phải đúng cả khi bản đồ / dữ liệu thay đổi"
+            self.screen.blit(self.font_small.render(note, True, COLOR_INFO), (x, INFO_RECT.bottom - 48))
 
 
 def main() -> None:

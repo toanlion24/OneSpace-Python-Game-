@@ -17,6 +17,7 @@ OUTPUT = ROOT / "codequest_full.py"
 # Thứ tự theo phụ thuộc: module đứng trước được dùng bởi module đứng sau.
 MODULE_ORDER = [
     "telex",
+    "variants",
     "engine",
     "par",
     "levels_practice",

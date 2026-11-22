@@ -59,6 +59,8 @@ CÁCH CHƠI
 - Chọn giai đoạn và màn ở menu, đọc phần Lý thuyết, viết code ở khung bên phải.
 - Bấm Chạy (hoặc Ctrl+Enter) để hero làm theo code của bạn.
 - Gợi ý: gợi hướng suy nghĩ khi bị bí.
+- Bản đồ kiểm tra ẩn: nhiều màn thử code của bạn trên một bản đồ dài hơn hoặc dữ liệu khác.
+  Đừng đếm ô hay gõ thẳng đáp án - hãy viết code tính từ bản đồ và từ biến.
 - Gõ tiếng Việt: dùng bộ gõ Telex có sẵn trong game (F2 bật/tắt),
   chỉ có tác dụng trong dấu nháy "..." và ghi chú #.
   Nên TẮT Unikey/EVKey khi chơi để tránh gõ chồng.

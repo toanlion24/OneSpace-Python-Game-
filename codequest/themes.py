@@ -23,22 +23,24 @@ class MapTheme:
     add: Color = NO_ADD
     # Màu nền khung bản đồ (phía sau ô gạch).
     backdrop: Color = (24, 28, 40)
+    # Hiệu ứng không khí: "snow", "dust", "fireflies", "sparkle", "leaves" hoặc "" (không có).
+    ambient: str = ""
 
 
 THEMES: list[MapTheme] = [
-    MapTheme("Sân gạch", floor=(1, 1), wall=(1, 4)),
-    MapTheme("Đồi đất đỏ", floor=(7, 1), wall=(7, 8), backdrop=(40, 26, 22)),
+    MapTheme("Sân gạch", floor=(1, 1), wall=(1, 4), ambient="leaves"),
+    MapTheme("Đồi đất đỏ", floor=(7, 1), wall=(7, 8), backdrop=(40, 26, 22), ambient="dust"),
     MapTheme("Rừng rêu", floor=(1, 1), wall=(1, 5), floor_multiply=(170, 220, 150), wall_multiply=(150, 205, 140),
-             backdrop=(20, 36, 26)),
+             backdrop=(20, 36, 26), ambient="fireflies"),
     MapTheme("Phòng thép", floor=(12, 1), wall=(1, 5), backdrop=(30, 34, 44)),
     MapTheme("Sa mạc", floor=(7, 1), wall=(7, 8), floor_multiply=(255, 225, 150), wall_multiply=(255, 220, 160),
-             add=(50, 40, 10), backdrop=(52, 42, 24)),
+             add=(50, 40, 10), backdrop=(52, 42, 24), ambient="dust"),
     MapTheme("Băng tuyết", floor=(12, 1), wall=(1, 4), floor_multiply=(210, 235, 255), wall_multiply=(170, 210, 255),
-             add=(20, 26, 36), backdrop=(26, 36, 52)),
+             add=(20, 26, 36), backdrop=(26, 36, 52), ambient="snow"),
     MapTheme("Lâu đài tím", floor=(12, 1), wall=(1, 4), floor_multiply=(225, 205, 255), wall_multiply=(190, 150, 255),
-             backdrop=(30, 20, 44)),
+             backdrop=(30, 20, 44), ambient="sparkle"),
     MapTheme("Hang đêm", floor=(1, 1), wall=(1, 4), floor_multiply=(120, 120, 190), wall_multiply=(110, 110, 160),
-             backdrop=(12, 12, 24)),
+             backdrop=(12, 12, 24), ambient="fireflies"),
 ]
 
 # World -> kiểu bản đồ: mỗi giai đoạn đổi cảnh, các World liền nhau không trùng kiểu.
