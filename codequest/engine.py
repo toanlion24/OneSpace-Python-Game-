@@ -49,6 +49,14 @@ TYPE_NAMES: dict[type, str] = {
     bool: "bool",
 }
 
+BLOCKING_REASONS: dict[str, str] = {
+    "wall": "Đụng tường!",
+    "door": "Cửa đang đóng!",
+    "box": "Thùng gỗ chắn đường - đập vỡ bằng hero.attack(...).",
+    "lock": "Cửa khoá - dùng hero.unlock(...) khi đã có chìa.",
+    "chest": "Rương báu chắn đường - mở bằng hero.open_chest(...).",
+}
+
 MAX_HERO_HP = 3
 MAX_ACTIONS = 1500
 MAX_TRACED_LINES = 30_000
@@ -86,6 +94,7 @@ class Level:
     say_contains: str | None = None
     start_hp: int = MAX_HERO_HP
     need_full_hp: bool = False
+    need_chests: int = 0
 
 
 @dataclass
@@ -102,6 +111,7 @@ class RunResult:
     error_line: int | None = None
     damage_taken: int = 0
     code_lines: int = 0
+    chests_opened: int = 0
 
 
 def upgrades_apply(level: Level) -> bool:
@@ -134,6 +144,11 @@ class World:
         self.enemies: dict[tuple[int, int], Enemy] = {}
         self.doors: dict[tuple[int, int], str] = {}
         self.jam_left: dict[tuple[int, int], int] = {}
+        # Vật thể mới: thùng gỗ (True = có ngọc bên trong), chìa khoá, cửa khoá, rương báu.
+        self.crates: dict[tuple[int, int], bool] = {}
+        self.keys_on_map: set[tuple[int, int]] = set()
+        self.locks: set[tuple[int, int]] = set()
+        self.chests: dict[tuple[int, int], bool] = {}
         self.exit_position: tuple[int, int] = (0, 0)
         self.hero_start: tuple[int, int] = (0, 0)
         self._parse()
@@ -144,6 +159,8 @@ class World:
         self.shield = shield and upgrades_apply(level)
         self.damage_taken = 0
         self.gems_collected = 0
+        self.keys = 0
+        self.chests_opened = 0
         self.events: list[dict[str, Any]] = []
         self.messages: list[str] = []
         self.actions = 0
@@ -173,6 +190,16 @@ class World:
                 elif char in ENEMY_CHARS:
                     kind = ENEMY_CHARS[char]
                     self.enemies[pos] = Enemy(kind, ENEMY_HP.get(kind, 1))
+                elif char == "O":
+                    self.crates[pos] = False
+                elif char == "Q":
+                    self.crates[pos] = True
+                elif char == "k":
+                    self.keys_on_map.add(pos)
+                elif char == "L":
+                    self.locks.add(pos)
+                elif char == "C":
+                    self.chests[pos] = False
 
     # ----------------------------------------------------------- helpers
     def emit(self, event_type: str, **data: Any) -> None:
@@ -188,12 +215,23 @@ class World:
             return "enemy"
         if pos in self.doors:
             return "door"
+        if pos in self.crates:
+            return "box"
+        if pos in self.locks:
+            return "lock"
+        if pos in self.chests:
+            return "chest"
         if pos in self.gems:
             return "gem"
+        if pos in self.keys_on_map:
+            return "key"
         return self.terrain.get(pos, "wall")
 
+    def is_blocking_object(self, pos: tuple[int, int]) -> bool:
+        return pos in self.enemies or pos in self.doors or pos in self.crates or pos in self.locks or pos in self.chests
+
     def is_walkable(self, pos: tuple[int, int]) -> bool:
-        if pos in self.enemies or pos in self.doors:
+        if self.is_blocking_object(pos):
             return False
         return self.terrain.get(pos, "wall") in ("floor", "exit")
 
@@ -232,10 +270,9 @@ class World:
             self.emit("bump", pos=origin, direction=direction)
             self.hurt("Quái chặn đường! Hãy dùng hero.attack().")
             return False
-        if name in ("wall", "door"):
-            reason = "Đụng tường!" if name == "wall" else "Cửa đang đóng!"
+        if name in BLOCKING_REASONS:
             self.emit("bump", pos=origin, direction=direction)
-            self.emit("info", text=reason)
+            self.emit("info", text=BLOCKING_REASONS[name])
             return False
 
         self.hero_x, self.hero_y = target
@@ -247,6 +284,10 @@ class World:
             color = self.gems.pop(target)
             self.gems_collected += 1
             self.emit("gem", pos=target, color=color)
+        if target in self.keys_on_map:
+            self.keys_on_map.discard(target)
+            self.keys += 1
+            self.emit("key", pos=target, keys=self.keys)
         return True
 
     def move(self, direction: str, steps: Any) -> None:
@@ -266,6 +307,14 @@ class World:
         self.count_action()
         target = self.neighbor(direction)
         enemy = self.enemies.get(target)
+        if enemy is None and target in self.crates:
+            has_gem = self.crates.pop(target)
+            self.emit("attack", direction=direction, target=target, hit=False)
+            self.emit("box_break", pos=target)
+            if has_gem:
+                self.gems[target] = 2
+                self.emit("gem_reveal", pos=target, color=2)
+            return
         if enemy is None:
             self.emit("attack", direction=direction, target=target, hit=False)
             self.emit("info", text="Đòn đánh trượt - không có quái ở đó.")
@@ -334,6 +383,50 @@ class World:
             return True
         self.emit("info", text=f"Thử {value!r}: chưa đúng.")
         return False
+
+    def unlock(self, direction: str) -> None:
+        self.check_direction(direction)
+        self.facing = direction
+        self.count_action()
+        pos = self.neighbor(direction)
+        if pos not in self.locks:
+            self.emit("info", text="Không có cửa khoá ở hướng đó.")
+            return
+        if self.keys <= 0:
+            raise ValueError("Chưa có chìa khoá! Hãy nhặt chìa (k) trước khi mở cửa khoá.")
+        self.keys -= 1
+        self.locks.discard(pos)
+        self.emit("unlock", pos=pos, keys=self.keys)
+
+    def open_chest(self, direction: str) -> None:
+        self.check_direction(direction)
+        self.facing = direction
+        self.count_action()
+        pos = self.neighbor(direction)
+        if pos not in self.chests:
+            self.emit("info", text="Không có rương ở hướng đó.")
+            return
+        if self.chests[pos]:
+            self.emit("info", text="Rương này đã mở rồi.")
+            return
+        self.chests[pos] = True
+        self.chests_opened += 1
+        self.emit("chest_open", pos=pos)
+
+    def find_objects(self, name: Any) -> list[dict[str, Any]]:
+        tables: dict[str, Any] = {
+            "gem": self.gems,
+            "enemy": self.enemies,
+            "box": self.crates,
+            "key": self.keys_on_map,
+            "lock": self.locks,
+            "chest": {pos for pos, opened in self.chests.items() if not opened},
+            "door": self.doors,
+        }
+        if name not in tables:
+            raise ValueError(f"Không biết vật thể '{name}'. Dùng: {', '.join(tables)}.")
+        positions = sorted(tables[name], key=lambda pos: (pos[1], pos[0]))
+        return [{"x": x, "y": y} for x, y in positions]
 
     def use(self, item: Any) -> None:
         power = getattr(item, "power", None)
@@ -514,6 +607,19 @@ class HeroAPI:
 
     def scan(self) -> list[list[str]]:
         return self._world.scan()
+
+    def unlock(self, direction: str) -> None:
+        self._world.unlock(direction)
+
+    def open_chest(self, direction: str) -> None:
+        self._world.open_chest(direction)
+
+    def find_objects(self, name: str) -> list[dict[str, Any]]:
+        return self._world.find_objects(name)
+
+    @property
+    def keys(self) -> int:
+        return self._world.keys
 
     # senses
     def look(self, direction: str) -> str:
@@ -873,12 +979,12 @@ def run_code(level: Level, source: str, bonus_hp: int = 0, shield: bool = False)
         sys.settrace(old_trace)
 
     if error_message is not None:
-        return RunResult(world.events, False, error_message, error_line, world.damage_taken, lines)
+        return RunResult(world.events, False, error_message, error_line, world.damage_taken, lines, world.chests_opened)
 
     problem = _judge(world, tree, level)
     if problem:
-        return RunResult(world.events, False, problem, None, world.damage_taken, lines)
-    return RunResult(world.events, True, "Hoàn thành màn chơi!", None, world.damage_taken, lines)
+        return RunResult(world.events, False, problem, None, world.damage_taken, lines, world.chests_opened)
+    return RunResult(world.events, True, "Hoàn thành màn chơi!", None, world.damage_taken, lines, world.chests_opened)
 
 
 def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
@@ -888,6 +994,8 @@ def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
         return f"Còn {len(world.gems)} viên ngọc chưa nhặt."
     if level.need_full_hp and world.hp < world.max_hp:
         return f"Hero mới có {world.hp}/{world.max_hp} máu - cần hồi đầy máu trước khi tới cúp."
+    if world.chests_opened < level.need_chests:
+        return f"Cần mở {level.need_chests} rương báu - mới mở {world.chests_opened}."
     if level.kill_all and world.enemies:
         return f"Còn {len(world.enemies)} quái chưa bị hạ."
     if level.say_contains is not None:

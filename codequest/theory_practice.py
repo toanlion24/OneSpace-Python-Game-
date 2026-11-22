@@ -1311,4 +1311,410 @@ PRACTICE_THEORY.update({
     ),
 })
 
+
+# ================================================================ BÀI 6: THỬ THÁCH VẬT THỂ MỚI
+OBJECTS_NOTE = (
+    "Vật thể mới: thùng gỗ (\"box\") đập bằng `hero.attack(huong)`; chìa khoá (\"key\") đi qua là nhặt, "
+    "`hero.keys` đếm số chìa; cửa khoá (\"lock\") mở bằng `hero.unlock(huong)`; rương báu (\"chest\") mở bằng "
+    "`hero.open_chest(huong)` - mỗi rương thưởng thêm xu."
+)
+
+PRACTICE_THEORY.update({
+    "1-6": Theory(
+        concept=[
+            "`hero.attack(\"right\")` không chỉ đánh quái - nó còn ĐẬP VỠ thùng gỗ ở ô bên phải.",
+            "Thùng vỡ rồi thì ô đó thành đường đi bình thường.",
+            OBJECTS_NOTE,
+        ],
+        starter_notes=[
+            ("hero.move_right(1)", "Đi tới đứng sát thùng."),
+            ("# thùng gỗ chắn đường!", "Ghi chú: cần phá thùng trước khi đi tiếp."),
+        ],
+        example=[
+            ("hero.move_down()", "Đi xuống sát thùng phía dưới."),
+            ('hero.attack("down")', "Đập thùng phía dưới."),
+            ("hero.move_down(2)", "Đi qua chỗ thùng vừa vỡ."),
+        ],
+        mistakes=["Đi thẳng vào thùng: hero đụng thùng và đứng lại."],
+    ),
+    "2-6": Theory(
+        concept=[
+            "Đi qua ô chìa khoá là tự nhặt. `hero.keys` cho biết đang có mấy chìa.",
+            "`hero.unlock(\"right\")` dùng 1 chìa để mở cửa khoá bên phải.",
+            "Biến có thể dùng trong phép tính: `steps + 1`.",
+        ],
+        starter_notes=[
+            ("steps = 1", "Biến số bước - cần đổi."),
+            ("hero.move_right(steps)", "Đi theo số bước trong biến."),
+        ],
+        example=[
+            ("hero.move_up(2)", "Đi lên, nhặt chìa trên đường."),
+            ("print(hero.keys)", "In 1."),
+            ('hero.unlock("up")', "Mở cửa khoá phía trên."),
+        ],
+        mistakes=["Gọi unlock khi chưa có chìa → lỗi ValueError."],
+    ),
+    "3-6": Theory(
+        concept=[
+            "`hero.look(huong)` trả về cả \"box\" (thùng), \"chest\" (rương), \"lock\" (cửa khoá), \"key\" (chìa).",
+            "Có thể viết nhiều câu `if` liên tiếp để kiểm tra nhiều hướng.",
+        ],
+        starter_notes=[
+            ("hero.move_right(2)", "Đi tới ngã ba."),
+            ('if hero.look("up") == "chest":', "Nếu phía trên là rương..."),
+            ("    pass", "...chưa làm gì - hãy mở rương."),
+        ],
+        example=[
+            ('if hero.look("left") == "box":', "Bên trái có thùng?"),
+            ('    hero.attack("left")', "Đập thùng."),
+            ('if hero.look("down") == "chest":', "Bên dưới có rương?"),
+            ('    hero.open_chest("down")', "Mở rương."),
+        ],
+        mistakes=["Mở rương bằng attack: rương không vỡ, phải dùng open_chest."],
+    ),
+    "4-6": Theory(
+        concept=[
+            "Khi một cặp lệnh lặp lại nhiều lần (đập thùng, bước lên), hãy đưa chúng vào vòng `for`.",
+            "Thùng có dấu X (Q) chứa ngọc: đập vỡ thì ngọc rơi ra ngay tại ô đó.",
+        ],
+        starter_notes=[
+            ('hero.attack("right")', "Đập thùng bên phải."),
+            ("hero.move_right()", "Bước lên chỗ thùng vừa vỡ."),
+        ],
+        example=[
+            ("for i in range(3):", "Lặp 3 lần."),
+            ('    hero.attack("down")', "Đập thùng phía dưới."),
+            ("    hero.move_down()", "Bước xuống."),
+        ],
+        mistakes=["Đặt hero.move_right() ngoài vòng lặp - chỉ bước được 1 lần."],
+    ),
+    "5-6": Theory(
+        concept=[
+            "`range()` chỉ nhận số nguyên: `range(\"2\")` báo TypeError, phải `range(int(\"2\"))`.",
+            "Mỗi lượt lặp làm trọn một việc: nhặt chìa, mở cửa, bước qua.",
+        ],
+        starter_notes=[
+            ('# doors = "2"', "Số cửa ghi bằng chuỗi."),
+            ("for i in range(doors):", "range với chuỗi sẽ lỗi."),
+            ("    hero.move_right()", "Mới chỉ bước, chưa mở cửa."),
+        ],
+        example=[
+            ('times = "3"', ""),
+            ("for i in range(int(times)):", "Đổi chuỗi sang số trước."),
+            ('    print("Lượt", i + 1)', "Lượt 1, 2, 3."),
+        ],
+        mistakes=["Lặp quá số cửa → unlock khi không còn cửa / không còn chìa."],
+    ),
+    "6-6": Theory(
+        concept=[
+            "Gói một chuỗi thao tác lặp lại (bước, đập thùng, bước) thành hàm để gọi nhiều lần.",
+            "Hàm giúp code ngắn - dễ đạt sao \"code gọn\".",
+        ],
+        starter_notes=[
+            ("def smash():", "Hàm phá thùng."),
+            ("    hero.move_right()", "Mới có bước đi - thiếu phần đập thùng."),
+            ("smash()", "Gọi hàm một lần."),
+        ],
+        example=[
+            ("def climb():", "Hàm leo một bậc."),
+            ('    hero.attack("up")', "Đập thùng phía trên."),
+            ("    hero.move_up()", "Leo lên."),
+            ("climb()", ""),
+            ("climb()", "Leo 2 bậc."),
+        ],
+        mistakes=["Định nghĩa hàm nhưng quên gọi."],
+    ),
+    "7-6": Theory(
+        concept=[
+            "Chỉ số âm đếm từ cuối chuỗi: `s[-1]` là ký tự cuối, `s[-2:]` là 2 ký tự cuối.",
+            "Rương báu mở bằng `hero.open_chest(huong)` - mỗi rương mở được thưởng thêm xu khi qua màn.",
+        ],
+        starter_notes=[
+            ('# note = "Mật mã ở cuối thư: 42"', "Biến note có sẵn."),
+            ("print(note[0])", "In chữ M - ký tự đầu."),
+        ],
+        example=[
+            ('code = "ABC-2026"', ""),
+            ("print(code[-4:])", "2026."),
+            ("print(int(code[-4:]) + 1)", "2027."),
+        ],
+        mistakes=["`note[-2]` chỉ lấy MỘT ký tự (số 4), không phải 42."],
+    ),
+    "8-6": Theory(
+        concept=[
+            "`hero.find_objects(\"box\")` trả về list dict {\"x\", \"y\"} của các thùng (dùng được với \"chest\", \"key\", \"lock\"...).",
+            "Ô bên trái của (x, y) là (x - 1, y): đứng đó rồi `attack(\"right\")`.",
+        ],
+        starter_notes=[
+            ('boxes = hero.find_objects("box")', "List toạ độ các thùng."),
+            ("print(boxes)", "In ra để xem."),
+        ],
+        example=[
+            ('for chest in hero.find_objects("chest"):', "Duyệt các rương."),
+            ('    hero.move_to(chest["x"] + 1, chest["y"])', "Đứng bên PHẢI rương."),
+            ('    hero.open_chest("left")', "Mở rương bên trái."),
+        ],
+        mistakes=["Lấy danh sách ngọc TRƯỚC khi đập thùng - thiếu các viên rơi ra sau."],
+    ),
+    "9-6": Theory(
+        concept=[
+            "`d.items()` cho từng cặp (khoá, giá trị) của dict: `for k, v in d.items():`.",
+            "Dict làm \"kế hoạch\": khoá là hướng, giá trị là việc cần làm.",
+        ],
+        starter_notes=[
+            ("for direction in plan:", "Duyệt dict chỉ cho khoá (hướng)."),
+            ("    print(direction)", "In up, down, right."),
+        ],
+        example=[
+            ('menu = {"phở": 40, "bún": 35}', ""),
+            ("for dish, price in menu.items():", "Cả tên lẫn giá."),
+            ('    print(dish, price, "nghìn")', ""),
+        ],
+        mistakes=["Duyệt `for direction in plan` rồi quên tra `plan[direction]`."],
+    ),
+    "10-6": Theory(
+        concept=[
+            "Comprehension trên bản đồ: `[(x, y) for y, row in enumerate(grid) for x, t in enumerate(row) if t == \"chest\"]`.",
+            "Ô ngay DƯỚI rương (x, y) là (x, y + 1) - đứng đó và mở hướng \"up\".",
+        ],
+        starter_notes=[
+            ("grid = hero.scan()", "Bản đồ grid[y][x]."),
+            ("print(grid[1])", "Hàng 1 - nơi có các rương."),
+        ],
+        example=[
+            ('board = [["box", "floor"], ["floor", "box"]]', ""),
+            ('boxes = [(x, y) for y, row in enumerate(board) for x, t in enumerate(row) if t == "box"]', ""),
+            ("print(boxes)", "[(0, 0), (1, 1)]."),
+        ],
+        mistakes=["Đi tới đúng ô rương bằng move_to → báo lỗi vì rương chắn đường."],
+    ),
+    "11-6": Theory(
+        concept=[
+            "`thu in tap_hop` kiểm tra rất nhanh - hợp để hỏi \"thứ này có nằm trong nhóm được phép không?\".",
+            "Vòng while + if: mỗi vòng chỉ làm MỘT việc (đập hoặc bước), rồi nhìn lại.",
+        ],
+        starter_notes=[
+            ('while hero.look("right") != "exit":', "Lặp tới khi cổng ở ngay bên phải."),
+            ("    hero.move_right()", "Chỉ bước - sẽ đụng thùng."),
+        ],
+        example=[
+            ('edible = {"táo", "cam"}', ""),
+            ('for food in ["táo", "đá", "cam"]:', ""),
+            ("    if food in edible:", ""),
+            ('        print("Ăn", food)', "Ăn táo, Ăn cam."),
+        ],
+        mistakes=["Đập cả ngọc rơi ra: ngọc không thuộc breakable, cứ bước lên là nhặt."],
+    ),
+    "12-6": Theory(
+        concept=[
+            "Kết hợp nhiều vật thể: chìa → cửa khoá → cửa mật mã.",
+            "`int(math.sqrt(50))` lấy phần nguyên của căn bậc hai: 7.",
+        ],
+        starter_notes=[
+            ("import math", "Nạp thư viện."),
+            ("print(math.sqrt(4))", "In 2.0."),
+        ],
+        example=[
+            ("import math", ""),
+            ("side = math.sqrt(30)", "≈ 5.477."),
+            ("print(int(side), math.ceil(side))", "5 6."),
+        ],
+        mistakes=["Quên mở cửa khoá trước khi đi tới cửa mật mã."],
+    ),
+    "13-6": Theory(
+        concept=[
+            "`hero.try_code` trả về True khi đúng - dùng `break` để dừng thử.",
+            "Thứ tự công việc quan trọng: thùng → cửa màu → rương → cúp.",
+        ],
+        starter_notes=[
+            ("from itertools import permutations", "Nạp hàm hoán vị."),
+            ('hero.attack("right")', "Đập thùng đầu tiên."),
+        ],
+        example=[
+            ("from itertools import permutations", ""),
+            ('for order in permutations(["A", "B"]):', ""),
+            ("    print(order)", "('A', 'B'), ('B', 'A')."),
+        ],
+        mistakes=["Dùng enter_code để thử: sai là mất máu - try_code thì không."],
+    ),
+    "14-6": Theory(
+        concept=[
+            "`Counter(...)` đếm được mọi loại ô của bản đồ cùng lúc.",
+            "Trải phẳng list lồng nhau bằng generator: `(t for row in grid for t in row)`.",
+        ],
+        starter_notes=[
+            ("from collections import Counter", "Nạp Counter."),
+            ("grid = hero.scan()", "Bản đồ."),
+            ("print(grid[1])", "In hàng 1."),
+        ],
+        example=[
+            ("from collections import Counter", ""),
+            ('rows = [["a", "b"], ["a", "a"]]', ""),
+            ("print(Counter(x for row in rows for x in row))", "Counter({'a': 3, 'b': 1})."),
+        ],
+        mistakes=["Đưa thẳng grid vào Counter → lỗi vì list không làm khoá được."],
+    ),
+    "15-6": Theory(
+        concept=[
+            "Ôn lại `date.fromisoformat(...)` và `.weekday()` (0 = thứ Hai).",
+            "Mở rương bằng `hero.open_chest(huong)`.",
+        ],
+        starter_notes=[
+            ("from datetime import date", "Nạp kiểu date."),
+            ("print(day)", "In chuỗi ngày."),
+        ],
+        example=[
+            ("from datetime import date", ""),
+            ("print(date(2026, 1, 1).weekday())", "3 - thứ Năm."),
+        ],
+        mistakes=["Gọi .weekday() trên chuỗi → AttributeError; phải đổi sang date trước."],
+    ),
+    "16-6": Theory(
+        concept=[
+            "`hero.unlock` khi chưa có chìa ném `ValueError` - bắt lỗi để xử lý thay vì để chương trình dừng.",
+            "Trong `except`: sửa tình huống (đi lấy chìa) rồi thử lại.",
+        ],
+        starter_notes=[
+            ('hero.unlock("right")', "Chưa có chìa → ValueError, chương trình dừng."),
+            ("hero.move_right(4)", "Không chạy tới được."),
+        ],
+        example=[
+            ("try:", ""),
+            ('    value = int("abc")', ""),
+            ("except ValueError:", "Không đổi được..."),
+            ("    value = 0", "...dùng giá trị mặc định."),
+            ("print(value)", "0."),
+        ],
+        mistakes=["Bắt nhầm loại lỗi (ví dụ except TypeError) - lỗi vẫn làm dừng chương trình."],
+    ),
+    "17-6": Theory(
+        concept=[
+            "Class gom dữ liệu (số rương đã mở) và hành động (open) vào một chỗ.",
+            "Phương thức có thể gọi lệnh của hero và cập nhật thuộc tính của self.",
+        ],
+        starter_notes=[
+            ("class Explorer:", "Class nhà thám hiểm."),
+            ("    def __init__(self):", "Chạy khi tạo."),
+            ("        self.opened = 0", "Chưa mở rương nào."),
+        ],
+        example=[
+            ("class Counter2:", ""),
+            ("    def __init__(self):", ""),
+            ("        self.value = 0", ""),
+            ("    def click(self):", ""),
+            ("        self.value += 1", ""),
+            ("c = Counter2()", ""),
+            ("c.click()", ""),
+            ("print(c.value)", "1."),
+        ],
+        mistakes=["Quên tăng self.opened → nói sai số rương."],
+    ),
+    "18-6": Theory(
+        concept=[
+            "Một vòng lặp \"thông minh\": mỗi bước nhìn ô bên phải rồi chọn hành động phù hợp (if / elif / else).",
+            "Có thể kiểm tra thêm hướng khác (phía dưới) trong cùng vòng lặp.",
+        ],
+        starter_notes=[
+            ('while hero.look("right") != "exit":', "Lặp tới khi cổng bên phải."),
+            ("    hero.move_right()", "Chỉ bước - sẽ kẹt ở thùng."),
+        ],
+        example=[
+            ("for thing in [\"box\", \"floor\", \"lock\"]:", ""),
+            ('    if thing == "box":', ""),
+            ('        print("đập")', ""),
+            ('    elif thing == "lock":', ""),
+            ('        print("mở khoá")', ""),
+            ("    else:", ""),
+            ('        print("bước")', ""),
+        ],
+        mistakes=["Viết các if riêng lẻ: một vòng có thể vừa đập vừa bước, làm lệch vị trí."],
+    ),
+    "19-6": Theory(
+        concept=[
+            "`sorted(ds, key=lambda c: c[\"x\"])` xếp list dict theo khoá \"x\".",
+            "`reverse=True` để xếp ngược (từ phải sang trái).",
+        ],
+        starter_notes=[
+            ('chests = hero.find_objects("chest")', "List rương."),
+            ("print(chests)", "In ra để xem."),
+        ],
+        example=[
+            ('pets = [{"name": "Mèo", "age": 3}, {"name": "Chó", "age": 1}]', ""),
+            ('youngest = sorted(pets, key=lambda p: p["age"])[0]', ""),
+            ('print(youngest["name"])', "Chó."),
+        ],
+        mistakes=["key=c[\"x\"] (thiếu lambda) → lỗi NameError."],
+    ),
+    "20-6": Theory(
+        concept=[
+            "Một regex có thể lấy chữ (`\\w+`) hoặc số (`\\d+`); dùng nhiều lần cho nhiều thông tin.",
+            "Kết quả `.group(1)` luôn là chuỗi - số cần `int()`, hướng dùng thẳng được.",
+        ],
+        starter_notes=[
+            ("import re", "Nạp regex."),
+            ("print(letter)", "In mật thư."),
+        ],
+        example=[
+            ("import re", ""),
+            ('msg = "Gặp ở phòng B lúc 15 giờ"', ""),
+            ('room = re.search(r"phòng (\\w+)", msg).group(1)', "'B'."),
+            ('hour = int(re.search(r"lúc (\\d+)", msg).group(1))', "15."),
+        ],
+        mistakes=["Quên dấu cách trong mẫu (\"hướng(\\w+)\") → không khớp."],
+    ),
+    "21-6": Theory(
+        concept=[
+            "Closure tạo ra các \"bùa\" giống nhau nhưng nhớ hướng khác nhau.",
+            "Hàm cũng có thể nằm trong list: `[f, g]` rồi gọi lần lượt.",
+        ],
+        starter_notes=[
+            ("def make_opener(direction):", "Nhà máy tạo bùa mở rương."),
+            ("    pass", "Chưa tạo gì."),
+        ],
+        example=[
+            ("def make_greeter(name):", ""),
+            ("    def greet():", ""),
+            ('        print("Chào", name)', ""),
+            ("    return greet", ""),
+            ('for g in [make_greeter("An"), make_greeter("Bình")]:', ""),
+            ("    g()", "Chào An, Chào Bình."),
+        ],
+        mistakes=["Gọi make_opener(\"up\") mà không gọi hàm nó trả về → rương chưa mở."],
+    ),
+    "22-6": Theory(
+        concept=[
+            "`np.array(bang).max()` tìm số lớn nhất trong cả bảng 2 chiều.",
+            "Kết quả là số của NumPy - `int(...)` để dùng làm mật mã.",
+        ],
+        starter_notes=[
+            ("import numpy as np", "Nạp NumPy."),
+            ("print(np.array(weights).shape)", "In (2, 2)."),
+        ],
+        example=[
+            ("import numpy as np", ""),
+            ("scores = np.array([[5, 9], [7, 6]])", ""),
+            ("print(scores.max(), scores.min())", "9 5."),
+        ],
+        mistakes=["max(weights) với list lồng nhau so sánh cả hàng - không ra số lớn nhất."],
+    ),
+    "23-6": Theory(
+        concept=[
+            "Gỡ lỗi chương trình có vật thể: kiểm tra THỨ TỰ (nhặt chìa trước khi mở), TÊN lệnh, và HƯỚNG.",
+            "Đọc thông báo lỗi ở Bảng tin để biết dòng nào sai, sửa từng lỗi rồi chạy lại.",
+        ],
+        starter_notes=[
+            ('hero.unlock("right")', "Chưa có chìa mà đã mở cửa."),
+            ("hero.move_right(2)", "Đi qua chìa."),
+            ('hero.open_chests("down")', "Tên lệnh có đúng không?"),
+            ('hero.attack("left")', "Thùng nằm ở hướng nào?"),
+            ("hero.move_right(3)", "Đi tới cúp."),
+        ],
+        example=[
+            ("hero.move_right()", "Ví dụ code ĐÚNG thứ tự: nhặt chìa..."),
+            ('hero.unlock("right")', "...rồi mới mở cửa."),
+        ],
+        mistakes=["Sửa xong một lỗi là dừng - hãy chạy lại để tìm lỗi tiếp theo."],
+    ),
+})
+
 THEORY.update(PRACTICE_THEORY)

@@ -124,6 +124,14 @@ class Assets:
             }
 
         self.gems = {color: strip(f"3 Objects/Gems/{color}.png", 16, 2.5) for color in range(1, 7)}
+        # Thùng gỗ: 1 = thùng thường (O), 2 = thùng có ngọc (Q).
+        self.crates = {
+            number: {
+                "idle": strip(f"3 Objects/Boxes/{number}_Idle.png", 32, 1.5),
+                "break": strip(f"3 Objects/Boxes/{number}_Break.png", 32, 1.5),
+            }
+            for number in (1, 2)
+        }
         self.trophy = strip("3 Objects/Checkpoints/End_Idle.png", 64, 0.95)
         self.spike = strip("6 Traps/4.png", 48, 1.0)[4]
         self.backgrounds = {

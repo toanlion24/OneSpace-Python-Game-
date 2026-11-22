@@ -48,6 +48,7 @@ class Progress:
         self.owned: set[str] = set()
         self.skin = "skin1"
         self.chests: set[int] = set()
+        self.loot: dict[str, int] = {}
         self.muted = False
         self.restored_from_backup = False
         self._load()
@@ -83,6 +84,9 @@ class Progress:
         self.chests |= {int(world) for world in data.get("chests", []) if str(world).isdigit()}
         if self.skin == "skin1" and isinstance(data.get("skin"), str):
             self.skin = data["skin"]
+        for level_id, count in dict(data.get("loot", {})).items():
+            if isinstance(count, int):
+                self.loot[str(level_id)] = max(self.loot.get(str(level_id), 0), count)
         if isinstance(data.get("muted"), bool):
             self.muted = data["muted"]
         self._migrate_old_wins()
@@ -108,6 +112,7 @@ class Progress:
             "owned": sorted(self.owned),
             "skin": self.skin,
             "chests": sorted(self.chests),
+            "loot": self.loot,
             "muted": self.muted,
         }
         return json.dumps(data, ensure_ascii=False, indent=2)

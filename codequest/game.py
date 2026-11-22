@@ -30,10 +30,20 @@ from .engine import (
     run_code,
     upgrades_apply,
 )
-from .hud import Confetti, draw_coin, draw_shield, draw_star, draw_star_row
+from .hud import (
+    Confetti,
+    draw_chest,
+    draw_coin,
+    draw_key,
+    draw_lock_door,
+    draw_shield,
+    draw_star,
+    draw_star_row,
+)
 from .levels import STAGES, WORLDS, all_levels, world_of
 from .progress import Progress
 from .rewards import (
+    LOOT_COINS,
     WORLD_CHEST_COINS,
     RewardSummary,
     apply_win,
@@ -63,8 +73,8 @@ MENU_TAB_Y = 132
 MENU_TAB_WIDTH = 224
 MENU_WORLDS_Y = 340
 MENU_ROWS_PER_COLUMN = 5
-MENU_LEVELS_OFFSET = 250
-MENU_LEVEL_WIDTH = 58
+MENU_LEVELS_OFFSET = 232
+MENU_LEVEL_WIDTH = 52
 INFO_RECT = pygame.Rect(768, 64, 496, 196)
 EDITOR_RECT = pygame.Rect(768, 270, 496, 372)
 BUTTON_Y = 652
@@ -88,6 +98,11 @@ EVENT_DURATIONS: dict[str, float] = {
     "hurt": 0.4,
     "heal": 0.5,
     "shield": 0.4,
+    "box_break": 0.3,
+    "gem_reveal": 0.15,
+    "key": 0.15,
+    "unlock": 0.35,
+    "chest_open": 0.5,
     "gem": 0.05,
     "door_open": 0.3,
     "jam": 0.35,
@@ -193,6 +208,12 @@ class Playback:
         self.gems = dict(world.gems)
         self.enemies = {pos: enemy.kind for pos, enemy in world.enemies.items()}
         self.doors = dict(world.doors)
+        self.crates = dict(world.crates)
+        self.keys_on_map = set(world.keys_on_map)
+        self.locks = set(world.locks)
+        self.chests = dict(world.chests)
+        self.hero_keys = 0
+        self.breaking: dict[tuple[int, int], tuple[bool, float]] = {}
         self.dying_enemies: dict[tuple[int, int], tuple[str, float]] = {}
         self.enemy_flash: dict[tuple[int, int], float] = {}
         self.door_shake: dict[tuple[int, int], float] = {}
@@ -308,6 +329,31 @@ class Playback:
         elif kind == "die":
             self._set_hero_state("hit")
             self.dead = True
+        elif kind == "box_break":
+            position = tuple(event["pos"])
+            has_gem = self.crates.pop(position, False)
+            self.breaking[position] = (has_gem, 0.4)
+            self.sound("hit")
+        elif kind == "gem_reveal":
+            self.gems[tuple(event["pos"])] = event["color"]
+            log("Thùng vỡ, lộ ra một viên ngọc!", COLOR_ACCENT)
+        elif kind == "key":
+            self.keys_on_map.discard(tuple(event["pos"]))
+            self.hero_keys = event["keys"]
+            self._float("+1 chìa", COLOR_ACCENT, pygame.Vector2(event["pos"]))
+            log(f"Nhặt được chìa khoá (đang có {self.hero_keys}).", COLOR_ACCENT)
+            self.sound("coin")
+        elif kind == "unlock":
+            self.locks.discard(tuple(event["pos"]))
+            self.hero_keys = event["keys"]
+            log("Đã mở cửa khoá!", COLOR_GOOD)
+            self.sound("door")
+        elif kind == "chest_open":
+            position = tuple(event["pos"])
+            self.chests[position] = True
+            self._float(f"+{LOOT_COINS} xu", COLOR_ACCENT, pygame.Vector2(position))
+            log(f"Mở rương báu: +{LOOT_COINS} xu (nhận khi qua màn).", COLOR_ACCENT)
+            self.sound("chest")
 
     def _progress(self, event: dict[str, Any], fraction: float) -> None:
         if event["type"] == "move":
@@ -340,6 +386,13 @@ class Playback:
                 table[key] -= delta_seconds
                 if table[key] <= 0:
                     del table[key]
+        for key in list(self.breaking):
+            has_gem, remaining = self.breaking[key]
+            remaining -= delta_seconds
+            if remaining <= 0:
+                del self.breaking[key]
+            else:
+                self.breaking[key] = (has_gem, remaining)
         for key in list(self.dying_enemies):
             kind, remaining = self.dying_enemies[key]
             remaining -= delta_seconds
@@ -657,7 +710,7 @@ class App:
             self.log("[OK] " + result.message, COLOR_GOOD)
             world = world_of(self.level.id)
             flags = star_flags(result, self.level.id)
-            summary = apply_win(self.progress, self.level, world.levels, world.number, flags)
+            summary = apply_win(self.progress, self.level, world.levels, world.number, flags, result.chests_opened)
             self.progress.save()
             self.win_summary = summary
             self.win_time = 0.0
@@ -926,6 +979,20 @@ class App:
             image = self.assets.door_locked if kind == "locked" else self.assets.door_jammed
             self.screen.blit(image, (origin_x + x * TILE + shake, origin_y + y * TILE))
 
+        for (x, y), has_gem in playback.crates.items():
+            self._blit_on_tile(self.assets.crates[2 if has_gem else 1]["idle"][0], x, y)
+        for (x, y), (has_gem, remaining) in playback.breaking.items():
+            image = self.assets.crates[2 if has_gem else 1]["break"][0].copy()
+            image.set_alpha(int(255 * remaining / 0.4))
+            self._blit_on_tile(image, x, y)
+        for x, y in playback.locks:
+            draw_lock_door(self.screen, pygame.Rect(origin_x + x * TILE, origin_y + y * TILE, TILE, TILE))
+        for (x, y), opened in playback.chests.items():
+            draw_chest(self.screen, pygame.Rect(origin_x + x * TILE, origin_y + y * TILE, TILE, TILE), opened, self.time)
+        for x, y in playback.keys_on_map:
+            bob = int(3 * pygame.math.Vector2(0, 1).rotate(self.time * 200 + x * 30).y)
+            draw_key(self.screen, (origin_x + x * TILE + TILE // 2, origin_y + y * TILE + TILE // 2 + bob), 12)
+
         for (x, y), color in playback.gems.items():
             bob = 3 * pygame.math.Vector2(0, 1).rotate(self.time * 180 + x * 40).y
             rect = self._blit_on_tile(self._frame(self.assets.gems[color], 10), x, y - 0.15)
@@ -982,8 +1049,15 @@ class App:
             color = COLOR_BAD if index < self.playback.hp else (70, 70, 90)
             heart = self.font_bold.render("♥", True, color)
             self.screen.blit(heart, (VIEW_RECT.x + 12 + index * 24, VIEW_RECT.y + 8))
+        next_x = VIEW_RECT.x + 24 + self.playback.max_hp * 24
         if self.playback.shield:
-            draw_shield(self.screen, (VIEW_RECT.x + 24 + self.playback.max_hp * 24, VIEW_RECT.y + 20), 8)
+            draw_shield(self.screen, (next_x, VIEW_RECT.y + 20), 8)
+            next_x += 26
+        world = self.playback.terrain_world
+        if world.keys_on_map or world.locks:
+            draw_key(self.screen, (next_x + 6, VIEW_RECT.y + 20), 10)
+            count = self.font_bold.render(f"x{self.playback.hero_keys}", True, COLOR_ACCENT)
+            self.screen.blit(count, (next_x + 26, VIEW_RECT.y + 8))
         collected = len(self.playback.terrain_world.gems) - len(self.playback.gems)
         total = len(self.playback.terrain_world.gems)
         if total:
@@ -1035,6 +1109,8 @@ class App:
 
         draw_coin(self.screen, (panel.x + 48, y + 16), 11)
         coin_text = f"+{summary.coins} xu" if summary.coins else "Không có xu mới (đã nhận ở lần trước)"
+        if summary.loot_coins:
+            coin_text += f"  (rương: +{summary.loot_coins})"
         self.screen.blit(self.font_bold.render(coin_text, True, COLOR_ACCENT), (panel.x + 66, y + 4))
         y += 34
         if summary.chest_world is not None:

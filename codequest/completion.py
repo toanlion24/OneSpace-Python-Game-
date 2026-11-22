@@ -46,12 +46,16 @@ HERO_MEMBERS: list[Suggestion] = [
     _call("use", "item", "Dùng vật có thuộc tính power để hồi máu"),
     _call("move_by", "vector", "Đi theo đối tượng có x, y"),
     _call("follow", "path", "Đi theo từng hướng trong lộ trình"),
+    _call("unlock", "direction", "Dùng 1 chìa mở cửa khoá bên cạnh"),
+    _call("open_chest", "direction", "Mở rương báu bên cạnh (+xu)"),
+    _call("find_objects", "name", "Toạ độ vật thể: \"box\", \"chest\", \"key\", \"lock\"..."),
     _plain("position", "Toạ độ hiện tại (x, y)"),
     _plain("exit_position", "Toạ độ cổng (x, y)"),
     _plain("hp", "Số máu hiện tại"),
     _plain("x", "Cột hiện tại"),
     _plain("y", "Hàng hiện tại"),
     _plain("gems_collected", "Số ngọc đã nhặt"),
+    _plain("keys", "Số chìa khoá đang có"),
 ]
 
 BUILTIN_FUNCTIONS: list[Suggestion] = [

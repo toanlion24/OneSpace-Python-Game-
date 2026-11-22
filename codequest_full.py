@@ -250,6 +250,14 @@ TYPE_NAMES: dict[type, str] = {
     bool: "bool",
 }
 
+BLOCKING_REASONS: dict[str, str] = {
+    "wall": "Đụng tường!",
+    "door": "Cửa đang đóng!",
+    "box": "Thùng gỗ chắn đường - đập vỡ bằng hero.attack(...).",
+    "lock": "Cửa khoá - dùng hero.unlock(...) khi đã có chìa.",
+    "chest": "Rương báu chắn đường - mở bằng hero.open_chest(...).",
+}
+
 MAX_HERO_HP = 3
 MAX_ACTIONS = 1500
 MAX_TRACED_LINES = 30_000
@@ -287,6 +295,7 @@ class Level:
     say_contains: str | None = None
     start_hp: int = MAX_HERO_HP
     need_full_hp: bool = False
+    need_chests: int = 0
 
 
 @dataclass
@@ -303,6 +312,7 @@ class RunResult:
     error_line: int | None = None
     damage_taken: int = 0
     code_lines: int = 0
+    chests_opened: int = 0
 
 
 def upgrades_apply(level: Level) -> bool:
@@ -335,6 +345,11 @@ class World:
         self.enemies: dict[tuple[int, int], Enemy] = {}
         self.doors: dict[tuple[int, int], str] = {}
         self.jam_left: dict[tuple[int, int], int] = {}
+        # Vật thể mới: thùng gỗ (True = có ngọc bên trong), chìa khoá, cửa khoá, rương báu.
+        self.crates: dict[tuple[int, int], bool] = {}
+        self.keys_on_map: set[tuple[int, int]] = set()
+        self.locks: set[tuple[int, int]] = set()
+        self.chests: dict[tuple[int, int], bool] = {}
         self.exit_position: tuple[int, int] = (0, 0)
         self.hero_start: tuple[int, int] = (0, 0)
         self._parse()
@@ -345,6 +360,8 @@ class World:
         self.shield = shield and upgrades_apply(level)
         self.damage_taken = 0
         self.gems_collected = 0
+        self.keys = 0
+        self.chests_opened = 0
         self.events: list[dict[str, Any]] = []
         self.messages: list[str] = []
         self.actions = 0
@@ -374,6 +391,16 @@ class World:
                 elif char in ENEMY_CHARS:
                     kind = ENEMY_CHARS[char]
                     self.enemies[pos] = Enemy(kind, ENEMY_HP.get(kind, 1))
+                elif char == "O":
+                    self.crates[pos] = False
+                elif char == "Q":
+                    self.crates[pos] = True
+                elif char == "k":
+                    self.keys_on_map.add(pos)
+                elif char == "L":
+                    self.locks.add(pos)
+                elif char == "C":
+                    self.chests[pos] = False
 
     # ----------------------------------------------------------- helpers
     def emit(self, event_type: str, **data: Any) -> None:
@@ -389,12 +416,23 @@ class World:
             return "enemy"
         if pos in self.doors:
             return "door"
+        if pos in self.crates:
+            return "box"
+        if pos in self.locks:
+            return "lock"
+        if pos in self.chests:
+            return "chest"
         if pos in self.gems:
             return "gem"
+        if pos in self.keys_on_map:
+            return "key"
         return self.terrain.get(pos, "wall")
 
+    def is_blocking_object(self, pos: tuple[int, int]) -> bool:
+        return pos in self.enemies or pos in self.doors or pos in self.crates or pos in self.locks or pos in self.chests
+
     def is_walkable(self, pos: tuple[int, int]) -> bool:
-        if pos in self.enemies or pos in self.doors:
+        if self.is_blocking_object(pos):
             return False
         return self.terrain.get(pos, "wall") in ("floor", "exit")
 
@@ -433,10 +471,9 @@ class World:
             self.emit("bump", pos=origin, direction=direction)
             self.hurt("Quái chặn đường! Hãy dùng hero.attack().")
             return False
-        if name in ("wall", "door"):
-            reason = "Đụng tường!" if name == "wall" else "Cửa đang đóng!"
+        if name in BLOCKING_REASONS:
             self.emit("bump", pos=origin, direction=direction)
-            self.emit("info", text=reason)
+            self.emit("info", text=BLOCKING_REASONS[name])
             return False
 
         self.hero_x, self.hero_y = target
@@ -448,6 +485,10 @@ class World:
             color = self.gems.pop(target)
             self.gems_collected += 1
             self.emit("gem", pos=target, color=color)
+        if target in self.keys_on_map:
+            self.keys_on_map.discard(target)
+            self.keys += 1
+            self.emit("key", pos=target, keys=self.keys)
         return True
 
     def move(self, direction: str, steps: Any) -> None:
@@ -467,6 +508,14 @@ class World:
         self.count_action()
         target = self.neighbor(direction)
         enemy = self.enemies.get(target)
+        if enemy is None and target in self.crates:
+            has_gem = self.crates.pop(target)
+            self.emit("attack", direction=direction, target=target, hit=False)
+            self.emit("box_break", pos=target)
+            if has_gem:
+                self.gems[target] = 2
+                self.emit("gem_reveal", pos=target, color=2)
+            return
         if enemy is None:
             self.emit("attack", direction=direction, target=target, hit=False)
             self.emit("info", text="Đòn đánh trượt - không có quái ở đó.")
@@ -535,6 +584,50 @@ class World:
             return True
         self.emit("info", text=f"Thử {value!r}: chưa đúng.")
         return False
+
+    def unlock(self, direction: str) -> None:
+        self.check_direction(direction)
+        self.facing = direction
+        self.count_action()
+        pos = self.neighbor(direction)
+        if pos not in self.locks:
+            self.emit("info", text="Không có cửa khoá ở hướng đó.")
+            return
+        if self.keys <= 0:
+            raise ValueError("Chưa có chìa khoá! Hãy nhặt chìa (k) trước khi mở cửa khoá.")
+        self.keys -= 1
+        self.locks.discard(pos)
+        self.emit("unlock", pos=pos, keys=self.keys)
+
+    def open_chest(self, direction: str) -> None:
+        self.check_direction(direction)
+        self.facing = direction
+        self.count_action()
+        pos = self.neighbor(direction)
+        if pos not in self.chests:
+            self.emit("info", text="Không có rương ở hướng đó.")
+            return
+        if self.chests[pos]:
+            self.emit("info", text="Rương này đã mở rồi.")
+            return
+        self.chests[pos] = True
+        self.chests_opened += 1
+        self.emit("chest_open", pos=pos)
+
+    def find_objects(self, name: Any) -> list[dict[str, Any]]:
+        tables: dict[str, Any] = {
+            "gem": self.gems,
+            "enemy": self.enemies,
+            "box": self.crates,
+            "key": self.keys_on_map,
+            "lock": self.locks,
+            "chest": {pos for pos, opened in self.chests.items() if not opened},
+            "door": self.doors,
+        }
+        if name not in tables:
+            raise ValueError(f"Không biết vật thể '{name}'. Dùng: {', '.join(tables)}.")
+        positions = sorted(tables[name], key=lambda pos: (pos[1], pos[0]))
+        return [{"x": x, "y": y} for x, y in positions]
 
     def use(self, item: Any) -> None:
         power = getattr(item, "power", None)
@@ -715,6 +808,19 @@ class HeroAPI:
 
     def scan(self) -> list[list[str]]:
         return self._world.scan()
+
+    def unlock(self, direction: str) -> None:
+        self._world.unlock(direction)
+
+    def open_chest(self, direction: str) -> None:
+        self._world.open_chest(direction)
+
+    def find_objects(self, name: str) -> list[dict[str, Any]]:
+        return self._world.find_objects(name)
+
+    @property
+    def keys(self) -> int:
+        return self._world.keys
 
     # senses
     def look(self, direction: str) -> str:
@@ -1074,12 +1180,12 @@ def run_code(level: Level, source: str, bonus_hp: int = 0, shield: bool = False)
         sys.settrace(old_trace)
 
     if error_message is not None:
-        return RunResult(world.events, False, error_message, error_line, world.damage_taken, lines)
+        return RunResult(world.events, False, error_message, error_line, world.damage_taken, lines, world.chests_opened)
 
     problem = _judge(world, tree, level)
     if problem:
-        return RunResult(world.events, False, problem, None, world.damage_taken, lines)
-    return RunResult(world.events, True, "Hoàn thành màn chơi!", None, world.damage_taken, lines)
+        return RunResult(world.events, False, problem, None, world.damage_taken, lines, world.chests_opened)
+    return RunResult(world.events, True, "Hoàn thành màn chơi!", None, world.damage_taken, lines, world.chests_opened)
 
 
 def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
@@ -1089,6 +1195,8 @@ def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
         return f"Còn {len(world.gems)} viên ngọc chưa nhặt."
     if level.need_full_hp and world.hp < world.max_hp:
         return f"Hero mới có {world.hp}/{world.max_hp} máu - cần hồi đầy máu trước khi tới cúp."
+    if world.chests_opened < level.need_chests:
+        return f"Cần mở {level.need_chests} rương báu - mới mở {world.chests_opened}."
     if level.kill_all and world.enemies:
         return f"Còn {len(world.enemies)} quái chưa bị hạ."
     if level.say_contains is not None:
@@ -1113,116 +1221,139 @@ PAR: dict[str, int] = {
     "1-3": 2,
     "1-4": 7,
     "1-5": 4,
+    "1-6": 3,
     "2-1": 2,
     "2-2": 5,
     "2-3": 4,
     "2-4": 2,
     "2-5": 4,
+    "2-6": 4,
     "3-1": 4,
     "3-2": 6,
     "3-3": 5,
     "3-4": 6,
     "3-5": 4,
+    "3-6": 6,
     "4-1": 2,
     "4-2": 3,
     "4-3": 3,
     "4-4": 3,
     "4-5": 4,
+    "4-6": 4,
     "5-1": 3,
     "5-2": 4,
     "5-3": 1,
     "5-4": 3,
     "5-5": 4,
+    "5-6": 5,
     "6-1": 10,
     "6-2": 4,
     "6-3": 5,
     "6-4": 5,
     "6-5": 5,
+    "6-6": 8,
     "7-1": 4,
     "7-2": 3,
     "7-3": 3,
     "7-4": 4,
     "7-5": 4,
+    "7-6": 4,
     "8-1": 4,
     "8-2": 4,
     "8-3": 3,
     "8-4": 5,
     "8-5": 2,
+    "8-6": 7,
     "9-1": 6,
     "9-2": 5,
     "9-3": 6,
     "9-4": 7,
     "9-5": 3,
+    "9-6": 6,
     "10-1": 4,
     "10-2": 5,
     "10-3": 4,
     "10-4": 5,
     "10-5": 6,
+    "10-6": 7,
     "11-1": 6,
     "11-2": 4,
     "11-3": 8,
     "11-4": 4,
     "11-5": 5,
+    "11-6": 6,
     "12-1": 6,
     "12-2": 5,
     "12-3": 5,
     "12-4": 6,
     "12-5": 4,
+    "12-6": 6,
     "13-1": 6,
     "13-2": 9,
     "13-3": 6,
     "13-4": 5,
     "13-5": 9,
+    "13-6": 9,
     "14-1": 7,
     "14-2": 7,
     "14-3": 7,
     "14-4": 6,
     "14-5": 5,
+    "14-6": 6,
     "15-1": 6,
     "15-2": 4,
     "15-3": 6,
     "15-4": 5,
     "15-5": 6,
+    "15-6": 5,
     "16-1": 9,
     "16-2": 12,
     "16-3": 10,
     "16-4": 9,
     "16-5": 9,
+    "16-6": 7,
     "17-1": 5,
     "17-2": 11,
     "17-3": 6,
     "17-4": 11,
     "17-5": 10,
+    "17-6": 11,
     "18-1": 18,
     "18-2": 11,
     "18-3": 5,
     "18-4": 9,
     "18-5": 10,
+    "18-6": 11,
     "19-1": 6,
     "19-2": 4,
     "19-3": 4,
     "19-4": 9,
     "19-5": 5,
+    "19-6": 6,
     "20-1": 5,
     "20-2": 6,
     "20-3": 5,
     "20-4": 6,
     "20-5": 6,
+    "20-6": 7,
     "21-1": 9,
     "21-2": 11,
     "21-3": 8,
     "21-4": 16,
     "21-5": 12,
+    "21-6": 8,
     "22-1": 5,
     "22-2": 8,
     "22-3": 5,
     "22-4": 7,
     "22-5": 6,
+    "22-6": 5,
     "23-1": 3,
     "23-2": 6,
     "23-3": 4,
     "23-4": 3,
     "23-5": 4,
+    "23-6": 6,
 }
 
 
@@ -2398,6 +2529,363 @@ PRACTICE[23] = [
         requires=["while"],
     ),
 ]
+
+# ================================================================ BÀI 6: THỬ THÁCH VẬT THỂ MỚI
+# Ký hiệu thêm: O thùng gỗ, Q thùng có ngọc, k chìa khoá, L cửa khoá, C rương báu.
+CHEST_AND_DOOR = [
+    "#######",
+    "#C#####",
+    "#@.D.E#",
+    "#######",
+]
+CHALLENGES: dict[int, Level] = {
+    1: Level(
+        id="1-6",
+        title="Thử thách: Thùng gỗ",
+        story="Thùng gỗ chắn ngang đường! hero.attack(\"right\") đập vỡ thùng ở bên phải.",
+        goal="Đập vỡ thùng gỗ, nhặt ngọc và tới cúp.",
+        rows=corridor("@.O..GE"),
+        starter="hero.move_right(1)\n# thùng gỗ chắn đường!\n",
+        hints=["Đứng sát thùng rồi tấn công về phía thùng.", "Thùng vỡ thì đường thông - đi tiếp tới cúp."],
+        requires=["call:attack"],
+    ),
+    2: Level(
+        id="2-6",
+        title="Thử thách: Chìa khoá",
+        story=(
+            "Đi qua chìa khoá (k) là nhặt được. Cửa khoá (L) mở bằng hero.unlock(\"right\") khi đã có chìa. "
+            "Hãy dùng một biến steps cho cả hai đoạn đường."
+        ),
+        goal="Nhặt chìa, mở cửa khoá, tới cúp - dùng biến steps.",
+        rows=corridor("@.k.L.GE"),
+        starter="steps = 1\nhero.move_right(steps)\n",
+        hints=["Đoạn đầu dài 3 ô (đi qua chìa).", "Đoạn sau dài hơn đoạn đầu 1 ô: steps + 1."],
+        requires=["assign", "call:unlock"],
+    ),
+    3: Level(
+        id="3-6",
+        title="Thử thách: Rương bí mật",
+        story="hero.look(...) còn nhận ra \"box\" (thùng) và \"chest\" (rương). hero.open_chest(\"up\") mở rương phía trên.",
+        goal="Ở ngã ba: nếu trên có rương thì mở; nếu phải có thùng thì đập. Rồi tới cúp.",
+        rows=[
+            "########",
+            "###C####",
+            "#@..O.E#",
+            "########",
+        ],
+        starter='hero.move_right(2)\nif hero.look("up") == "chest":\n    pass\n',
+        hints=["Thay pass bằng lệnh mở rương phía trên.", "Viết thêm một if cho thùng gỗ bên phải."],
+        requires=["if"],
+        need_chests=1,
+    ),
+    4: Level(
+        id="4-6",
+        title="Thử thách: Hàng thùng",
+        story="Năm cái thùng xếp thành hàng. Thùng có dấu X (Q) chứa ngọc - đập vỡ là ngọc rơi ra, đi qua để nhặt.",
+        goal="Dùng vòng lặp: đập thùng rồi bước lên, lặp lại cho hết hàng. Tới cúp.",
+        rows=corridor("@OQOQOE"),
+        starter='hero.attack("right")\nhero.move_right()\n',
+        hints=["Hai lệnh trong code ban đầu là một vòng - lặp nó lại.", "Đếm số thùng; sau vòng lặp còn thiếu một bước."],
+        requires=["for"],
+    ),
+    5: Level(
+        id="5-6",
+        title="Thử thách: Cửa đôi",
+        story="Có doors = \"2\" cặp chìa - cửa nối tiếp nhau. Mỗi lượt: nhặt chìa, mở cửa, bước qua.",
+        goal="Lặp đúng số lượt (đổi doors sang số), mở hết cửa khoá, tới cúp.",
+        rows=corridor("@kLkLE"),
+        starter='# doors = "2"\nfor i in range(doors):\n    hero.move_right()\n',
+        hints=["range cần số nguyên - đổi doors bằng int().", "Mỗi lượt: bước lên nhặt chìa, mở cửa bên phải, bước qua cửa."],
+        requires=["call:int"],
+        extra_globals={"doors": "2"},
+    ),
+    6: Level(
+        id="6-6",
+        title="Thử thách: Chiêu phá thùng",
+        story="Ba cái thùng cách đều nhau. Viết một hàm làm trọn một lượt phá thùng để gọi lại nhiều lần.",
+        goal="Viết hàm (ví dụ smash) gồm: bước lên, đập thùng, bước vào chỗ thùng vừa vỡ. Dùng nó 3 lần rồi tới cúp.",
+        rows=corridor("@.O.O.O.E"),
+        starter="def smash():\n    hero.move_right()\n\nsmash()\n",
+        hints=["Thêm lệnh đập thùng và một bước nữa vào hàm.", "Sau 3 lần gọi hàm, còn 2 ô nữa tới cúp."],
+        requires=["def"],
+    ),
+    7: Level(
+        id="7-6",
+        title="Thử thách: Thư trong rương",
+        story="note = \"Mật mã ở cuối thư: 42\". Mở rương phía trên, rồi cắt lấy 2 ký tự cuối của note làm mật mã.",
+        goal="Mở rương, cắt chuỗi lấy mật mã, mở cửa và tới cúp.",
+        rows=CHEST_AND_DOOR,
+        starter='# note = "Mật mã ở cuối thư: 42"\nprint(note[0])\n',
+        hints=["Chỉ số âm đếm từ cuối: [-2:] lấy 2 ký tự cuối.", "Đứng cạnh cửa rồi mới nhập mật mã."],
+        requires=["slice"],
+        extra_globals={"note": "Mật mã ở cuối thư: 42"},
+        door_code=42,
+        need_chests=1,
+    ),
+    8: Level(
+        id="8-6",
+        title="Thử thách: Danh sách thùng",
+        story=(
+            "hero.find_objects(\"box\") trả về list toạ độ các thùng. Đứng bên TRÁI mỗi thùng rồi đập. "
+            "Ngọc rơi ra phải đi nhặt hết."
+        ),
+        goal="Duyệt list thùng để đập hết, nhặt hết ngọc rơi ra, rồi tới cổng.",
+        rows=[
+            "#########",
+            "#@..Q...#",
+            "#.......#",
+            "#..Q..O.#",
+            "#......E#",
+            "#########",
+        ],
+        starter='boxes = hero.find_objects("box")\nprint(boxes)\n',
+        hints=["Ô bên trái thùng có toạ độ x nhỏ hơn 1.", "Đập xong hết thùng mới tìm lại danh sách ngọc."],
+        requires=["for", "call:find_objects"],
+    ),
+    9: Level(
+        id="9-6",
+        title="Thử thách: Sổ kế hoạch",
+        story="plan là dict: hướng → vật ở hướng đó (\"chest\" hoặc \"box\"). Duyệt plan.items() để xử lý từng hướng.",
+        goal="Mở hết rương, đập thùng theo plan, rồi tới cúp.",
+        rows=[
+            "#######",
+            "##C####",
+            "#.@O.E#",
+            "##C####",
+            "#######",
+        ],
+        starter="for direction in plan:\n    print(direction)\n",
+        hints=["for direction, thing in plan.items() cho cả hướng lẫn vật.", "Rương thì mở, thùng thì đập."],
+        requires=["for", "call:items"],
+        extra_globals={"plan": {"up": "chest", "down": "chest", "right": "box"}},
+        need_chests=2,
+    ),
+    10: Level(
+        id="10-6",
+        title="Thử thách: Ba rương báu",
+        story="Dùng hero.scan() và comprehension để tìm toạ độ mọi ô \"chest\". Mở rương từ ô ngay bên dưới nó.",
+        goal="Tìm ba rương bằng comprehension, mở hết, rồi tới cổng.",
+        rows=[
+            "#########",
+            "#.C.C.C.#",
+            "#@......#",
+            "#......E#",
+            "#########",
+        ],
+        starter="grid = hero.scan()\nprint(grid[1])\n",
+        hints=["Giữ lại (x, y) khi ô là \"chest\".", "Đi tới (x, y + 1) rồi mở rương hướng \"up\"."],
+        requires=["listcomp", "call:scan"],
+        need_chests=3,
+    ),
+    11: Level(
+        id="11-6",
+        title="Thử thách: Chỉ đập thùng",
+        story="breakable = {\"box\"} là tập những thứ được phép đập. Đi dọc hành lang: gặp thứ trong tập thì đập, không thì bước.",
+        goal="Dùng toán tử in với tập breakable để dọn đường tới cúp.",
+        rows=corridor("@.O.QO.E"),
+        starter='while hero.look("right") != "exit":\n    hero.move_right()\n',
+        hints=["Trong vòng lặp, kiểm tra hero.look(\"right\") có nằm trong breakable không.", "Sau vòng lặp, bước thêm 1 ô vào cổng."],
+        requires=["membership", "while"],
+        extra_globals={"breakable": {"box"}},
+    ),
+    12: Level(
+        id="12-6",
+        title="Thử thách: Chìa và căn bậc hai",
+        story="Nhặt chìa để qua cửa khoá. Cửa mật mã cần phần nguyên căn bậc hai của area = 50.",
+        goal="Nhặt chìa, mở cửa khoá, nhập mật mã int(math.sqrt(area)), tới cúp.",
+        rows=corridor("@k.L.D.GE"),
+        starter="import math\nprint(math.sqrt(4))\n",
+        hints=["Chìa ở ngay ô thứ nhất bên phải - đi 2 ô là tới sát cửa khoá.", "math.sqrt(50) ≈ 7.07 - chỉ lấy phần nguyên."],
+        requires=["import:math", "call:unlock"],
+        extra_globals={"area": 50},
+        door_code=7,
+    ),
+    13: Level(
+        id="13-6",
+        title="Thử thách: Khoá ba màu",
+        story=(
+            "Đập thùng, rồi mở khoá màu: colors = [\"đỏ\", \"xanh\", \"vàng\"] phải xếp đúng thứ tự (dùng permutations và try_code). "
+            "Qua cửa xong mở rương phía trên rồi tới cúp."
+        ),
+        goal="Đập thùng, thử hoán vị tới khi cửa mở, mở rương, tới cúp.",
+        rows=[
+            "########",
+            "#####C##",
+            "#@O.D.E#",
+            "########",
+        ],
+        starter="from itertools import permutations\nhero.attack(\"right\")\n",
+        hints=["Sau khi đập thùng, bước 2 ô là tới sát cửa.", "Mở được cửa thì dừng vòng lặp; rương nằm trên ô ngay sau cửa."],
+        requires=["call:permutations"],
+        extra_globals={"colors": ["đỏ", "xanh", "vàng"]},
+        door_code=("vàng", "đỏ", "xanh"),
+        need_chests=1,
+    ),
+    14: Level(
+        id="14-6",
+        title="Thử thách: Kiểm kê thùng",
+        story="Mật mã = số thùng gỗ trong phòng. Dùng hero.scan() rồi Counter đếm mọi ô của bản đồ.",
+        goal="Đếm số ô \"box\" bằng Counter, nhập làm mật mã, tới cúp.",
+        rows=[
+            "#########",
+            "#O.O..O.#",
+            "#@..D.GE#",
+            "#.O.....#",
+            "#########",
+        ],
+        starter="from collections import Counter\ngrid = hero.scan()\nprint(grid[1])\n",
+        hints=["Trải phẳng bản đồ rồi đưa vào Counter.", "Tra kết quả Counter với khoá \"box\"."],
+        requires=["call:Counter", "call:scan"],
+        door_code=4,
+    ),
+    15: Level(
+        id="15-6",
+        title="Thử thách: Rương Giáng sinh",
+        story="Mở rương phía trên. Mật mã cửa = thứ trong tuần (weekday) của day = \"2026-12-25\".",
+        goal="Mở rương, tính weekday() của ngày Giáng sinh, mở cửa, tới cúp.",
+        rows=CHEST_AND_DOOR,
+        starter="from datetime import date\nprint(day)\n",
+        hints=["Đổi day sang date bằng fromisoformat.", "Mở rương trước, rồi đi 1 ô tới sát cửa."],
+        requires=["import:datetime"],
+        extra_globals={"day": "2026-12-25"},
+        door_code=4,
+        need_chests=1,
+    ),
+    16: Level(
+        id="16-6",
+        title="Thử thách: Quên chìa",
+        story=(
+            "hero.unlock khi chưa có chìa sẽ báo lỗi ValueError. Chìa nằm ngay SAU LƯNG hero. "
+            "Hãy thử mở cửa, nếu lỗi thì quay lại lấy chìa rồi mở lại."
+        ),
+        goal="Bắt lỗi ValueError khi mở cửa không có chìa, lấy chìa, mở cửa, tới cúp.",
+        rows=corridor("k@L.GE"),
+        starter='hero.unlock("right")\nhero.move_right(4)\n',
+        hints=["Bọc lệnh unlock đầu tiên trong try.", "Trong except: lùi 1 ô lấy chìa, quay lại, mở cửa."],
+        requires=["try", "except:ValueError"],
+    ),
+    17: Level(
+        id="17-6",
+        title="Thử thách: Nhà thám hiểm",
+        story="Viết class Explorer có phương thức open(direction): mở rương ở hướng đó và đếm số rương đã mở.",
+        goal="Dùng Explorer mở 2 rương (trên và trái), nói \"Mở 2 rương\", rồi tới cúp.",
+        rows=[
+            "#######",
+            "###C###",
+            "##C@.E#",
+            "#######",
+        ],
+        starter="class Explorer:\n    def __init__(self):\n        self.opened = 0\n",
+        hints=["Phương thức open(self, direction) gọi hero.open_chest rồi tăng self.opened.", "Nói số rương bằng f-string với e.opened."],
+        requires=["class", "method"],
+        need_chests=2,
+        say_contains="Mở 2 rương",
+    ),
+    18: Level(
+        id="18-6",
+        title="Thử thách: Đường kho báu",
+        story=(
+            "Hành lang có thùng, chìa, quái, cửa khoá; một rương nằm phía dưới đường đi. "
+            "Viết một vòng lặp tự xử lý mọi thứ: nhìn sang phải để quyết định làm gì, và mở rương nếu thấy ở dưới."
+        ),
+        goal="Dùng vòng lặp while + if để vượt hết chướng ngại, mở rương, tới cúp.",
+        rows=[
+            "#############",
+            "#@.O.k.r.L.E#",
+            "##########C##",
+        ],
+        starter='while hero.look("right") != "exit":\n    hero.move_right()\n',
+        hints=[
+            "Thùng hoặc quái thì tấn công, cửa khoá thì unlock, còn lại thì bước.",
+            "Sau mỗi bước, kiểm tra phía dưới có rương không.",
+        ],
+        requires=["while", "if"],
+        need_chests=1,
+    ),
+    19: Level(
+        id="19-6",
+        title="Thử thách: Mở rương có thứ tự",
+        story="hero.find_objects(\"chest\") cho list rương. Dùng sorted với key=lambda để xếp rương theo cột x từ trái sang phải.",
+        goal="Xếp rương bằng sorted + lambda, mở từng rương từ ô ngay dưới nó, rồi tới cổng.",
+        rows=[
+            "#########",
+            "#C..C..C#",
+            "#.......#",
+            "#@.....E#",
+            "#########",
+        ],
+        starter='chests = hero.find_objects("chest")\nprint(chests)\n',
+        hints=["key=lambda c: c[\"x\"]", "Đi tới (x, y + 1) rồi mở rương hướng \"up\"."],
+        requires=["lambda", "call:sorted"],
+        need_chests=3,
+    ),
+    20: Level(
+        id="20-6",
+        title="Thử thách: Mật thư chỉ đường",
+        story=(
+            "letter = \"Rương ở hướng up, cửa mã 7314.\" Dùng regex lấy hướng (chữ sau \"hướng \") và mật mã (số sau \"mã \")."
+        ),
+        goal="Đọc mật thư bằng regex, mở rương đúng hướng, mở cửa, tới cúp.",
+        rows=CHEST_AND_DOOR,
+        starter="import re\nprint(letter)\n",
+        hints=["\\w+ khớp một từ, \\d+ khớp một số.", "Đặt phần cần lấy trong ( ) rồi dùng .group(1)."],
+        requires=["import:re"],
+        extra_globals={"letter": "Rương ở hướng up, cửa mã 7314."},
+        door_code=7314,
+        need_chests=1,
+    ),
+    21: Level(
+        id="21-6",
+        title="Thử thách: Bùa mở rương",
+        story="Viết closure make_opener(direction) trả về một hàm mở rương ở hướng đó. Tạo bùa cho hướng up và left.",
+        goal="Dùng các hàm tạo từ make_opener mở 2 rương, đập thùng, tới cúp.",
+        rows=[
+            "#######",
+            "##C####",
+            "#C@O.E#",
+            "#######",
+        ],
+        starter="def make_opener(direction):\n    pass\n",
+        hints=["Hàm bên trong không cần tham số - nó nhớ direction.", "Mở xong 2 rương thì đập thùng bên phải rồi đi 3 ô."],
+        requires=["closure"],
+        need_chests=2,
+    ),
+    22: Level(
+        id="22-6",
+        title="Thử thách: Rương nặng nhất",
+        story="Mở rương phía trên. weights là bảng cân nặng các thỏi vàng; mật mã = số lớn nhất trong bảng (dùng NumPy).",
+        goal="Mở rương, tìm max của mảng NumPy, mở cửa, tới cúp.",
+        rows=CHEST_AND_DOOR,
+        starter="import numpy as np\nprint(np.array(weights).shape)\n",
+        hints=["Mảng NumPy có .max().", "Đổi kết quả sang int trước khi nhập."],
+        requires=["import:numpy"],
+        extra_globals={"weights": [[3, 8], [6, 2]]},
+        door_code=8,
+        need_chests=1,
+    ),
+    23: Level(
+        id="23-6",
+        title="Thử thách: Bọ vật thể",
+        story="Code này có nhiều lỗi: sai thứ tự (mở cửa khi chưa có chìa), gõ sai tên lệnh, đánh sai hướng. Sửa hết!",
+        goal="Nhặt chìa, mở rương bên dưới, mở cửa khoá, đập thùng và tới cúp.",
+        rows=[
+            "##########",
+            "#@k.L.O.E#",
+            "###C######",
+        ],
+        starter=(
+            'hero.unlock("right")\n'
+            "hero.move_right(2)\n"
+            'hero.open_chests("down")\n'
+            'hero.attack("left")\n'
+            "hero.move_right(3)\n"
+        ),
+        hints=["Phải nhặt chìa trước khi unlock - để ý thứ tự các dòng.", "Tên lệnh đúng là open_chest; thùng nằm bên phải."],
+        need_chests=1,
+    ),
+}
+for _world_number, _challenge in CHALLENGES.items():
+    PRACTICE[_world_number].append(_challenge)
 
 
 # ======================================================================
@@ -6097,6 +6585,412 @@ PRACTICE_THEORY.update({
     ),
 })
 
+
+# ================================================================ BÀI 6: THỬ THÁCH VẬT THỂ MỚI
+OBJECTS_NOTE = (
+    "Vật thể mới: thùng gỗ (\"box\") đập bằng `hero.attack(huong)`; chìa khoá (\"key\") đi qua là nhặt, "
+    "`hero.keys` đếm số chìa; cửa khoá (\"lock\") mở bằng `hero.unlock(huong)`; rương báu (\"chest\") mở bằng "
+    "`hero.open_chest(huong)` - mỗi rương thưởng thêm xu."
+)
+
+PRACTICE_THEORY.update({
+    "1-6": Theory(
+        concept=[
+            "`hero.attack(\"right\")` không chỉ đánh quái - nó còn ĐẬP VỠ thùng gỗ ở ô bên phải.",
+            "Thùng vỡ rồi thì ô đó thành đường đi bình thường.",
+            OBJECTS_NOTE,
+        ],
+        starter_notes=[
+            ("hero.move_right(1)", "Đi tới đứng sát thùng."),
+            ("# thùng gỗ chắn đường!", "Ghi chú: cần phá thùng trước khi đi tiếp."),
+        ],
+        example=[
+            ("hero.move_down()", "Đi xuống sát thùng phía dưới."),
+            ('hero.attack("down")', "Đập thùng phía dưới."),
+            ("hero.move_down(2)", "Đi qua chỗ thùng vừa vỡ."),
+        ],
+        mistakes=["Đi thẳng vào thùng: hero đụng thùng và đứng lại."],
+    ),
+    "2-6": Theory(
+        concept=[
+            "Đi qua ô chìa khoá là tự nhặt. `hero.keys` cho biết đang có mấy chìa.",
+            "`hero.unlock(\"right\")` dùng 1 chìa để mở cửa khoá bên phải.",
+            "Biến có thể dùng trong phép tính: `steps + 1`.",
+        ],
+        starter_notes=[
+            ("steps = 1", "Biến số bước - cần đổi."),
+            ("hero.move_right(steps)", "Đi theo số bước trong biến."),
+        ],
+        example=[
+            ("hero.move_up(2)", "Đi lên, nhặt chìa trên đường."),
+            ("print(hero.keys)", "In 1."),
+            ('hero.unlock("up")', "Mở cửa khoá phía trên."),
+        ],
+        mistakes=["Gọi unlock khi chưa có chìa → lỗi ValueError."],
+    ),
+    "3-6": Theory(
+        concept=[
+            "`hero.look(huong)` trả về cả \"box\" (thùng), \"chest\" (rương), \"lock\" (cửa khoá), \"key\" (chìa).",
+            "Có thể viết nhiều câu `if` liên tiếp để kiểm tra nhiều hướng.",
+        ],
+        starter_notes=[
+            ("hero.move_right(2)", "Đi tới ngã ba."),
+            ('if hero.look("up") == "chest":', "Nếu phía trên là rương..."),
+            ("    pass", "...chưa làm gì - hãy mở rương."),
+        ],
+        example=[
+            ('if hero.look("left") == "box":', "Bên trái có thùng?"),
+            ('    hero.attack("left")', "Đập thùng."),
+            ('if hero.look("down") == "chest":', "Bên dưới có rương?"),
+            ('    hero.open_chest("down")', "Mở rương."),
+        ],
+        mistakes=["Mở rương bằng attack: rương không vỡ, phải dùng open_chest."],
+    ),
+    "4-6": Theory(
+        concept=[
+            "Khi một cặp lệnh lặp lại nhiều lần (đập thùng, bước lên), hãy đưa chúng vào vòng `for`.",
+            "Thùng có dấu X (Q) chứa ngọc: đập vỡ thì ngọc rơi ra ngay tại ô đó.",
+        ],
+        starter_notes=[
+            ('hero.attack("right")', "Đập thùng bên phải."),
+            ("hero.move_right()", "Bước lên chỗ thùng vừa vỡ."),
+        ],
+        example=[
+            ("for i in range(3):", "Lặp 3 lần."),
+            ('    hero.attack("down")', "Đập thùng phía dưới."),
+            ("    hero.move_down()", "Bước xuống."),
+        ],
+        mistakes=["Đặt hero.move_right() ngoài vòng lặp - chỉ bước được 1 lần."],
+    ),
+    "5-6": Theory(
+        concept=[
+            "`range()` chỉ nhận số nguyên: `range(\"2\")` báo TypeError, phải `range(int(\"2\"))`.",
+            "Mỗi lượt lặp làm trọn một việc: nhặt chìa, mở cửa, bước qua.",
+        ],
+        starter_notes=[
+            ('# doors = "2"', "Số cửa ghi bằng chuỗi."),
+            ("for i in range(doors):", "range với chuỗi sẽ lỗi."),
+            ("    hero.move_right()", "Mới chỉ bước, chưa mở cửa."),
+        ],
+        example=[
+            ('times = "3"', ""),
+            ("for i in range(int(times)):", "Đổi chuỗi sang số trước."),
+            ('    print("Lượt", i + 1)', "Lượt 1, 2, 3."),
+        ],
+        mistakes=["Lặp quá số cửa → unlock khi không còn cửa / không còn chìa."],
+    ),
+    "6-6": Theory(
+        concept=[
+            "Gói một chuỗi thao tác lặp lại (bước, đập thùng, bước) thành hàm để gọi nhiều lần.",
+            "Hàm giúp code ngắn - dễ đạt sao \"code gọn\".",
+        ],
+        starter_notes=[
+            ("def smash():", "Hàm phá thùng."),
+            ("    hero.move_right()", "Mới có bước đi - thiếu phần đập thùng."),
+            ("smash()", "Gọi hàm một lần."),
+        ],
+        example=[
+            ("def climb():", "Hàm leo một bậc."),
+            ('    hero.attack("up")', "Đập thùng phía trên."),
+            ("    hero.move_up()", "Leo lên."),
+            ("climb()", ""),
+            ("climb()", "Leo 2 bậc."),
+        ],
+        mistakes=["Định nghĩa hàm nhưng quên gọi."],
+    ),
+    "7-6": Theory(
+        concept=[
+            "Chỉ số âm đếm từ cuối chuỗi: `s[-1]` là ký tự cuối, `s[-2:]` là 2 ký tự cuối.",
+            "Rương báu mở bằng `hero.open_chest(huong)` - mỗi rương mở được thưởng thêm xu khi qua màn.",
+        ],
+        starter_notes=[
+            ('# note = "Mật mã ở cuối thư: 42"', "Biến note có sẵn."),
+            ("print(note[0])", "In chữ M - ký tự đầu."),
+        ],
+        example=[
+            ('code = "ABC-2026"', ""),
+            ("print(code[-4:])", "2026."),
+            ("print(int(code[-4:]) + 1)", "2027."),
+        ],
+        mistakes=["`note[-2]` chỉ lấy MỘT ký tự (số 4), không phải 42."],
+    ),
+    "8-6": Theory(
+        concept=[
+            "`hero.find_objects(\"box\")` trả về list dict {\"x\", \"y\"} của các thùng (dùng được với \"chest\", \"key\", \"lock\"...).",
+            "Ô bên trái của (x, y) là (x - 1, y): đứng đó rồi `attack(\"right\")`.",
+        ],
+        starter_notes=[
+            ('boxes = hero.find_objects("box")', "List toạ độ các thùng."),
+            ("print(boxes)", "In ra để xem."),
+        ],
+        example=[
+            ('for chest in hero.find_objects("chest"):', "Duyệt các rương."),
+            ('    hero.move_to(chest["x"] + 1, chest["y"])', "Đứng bên PHẢI rương."),
+            ('    hero.open_chest("left")', "Mở rương bên trái."),
+        ],
+        mistakes=["Lấy danh sách ngọc TRƯỚC khi đập thùng - thiếu các viên rơi ra sau."],
+    ),
+    "9-6": Theory(
+        concept=[
+            "`d.items()` cho từng cặp (khoá, giá trị) của dict: `for k, v in d.items():`.",
+            "Dict làm \"kế hoạch\": khoá là hướng, giá trị là việc cần làm.",
+        ],
+        starter_notes=[
+            ("for direction in plan:", "Duyệt dict chỉ cho khoá (hướng)."),
+            ("    print(direction)", "In up, down, right."),
+        ],
+        example=[
+            ('menu = {"phở": 40, "bún": 35}', ""),
+            ("for dish, price in menu.items():", "Cả tên lẫn giá."),
+            ('    print(dish, price, "nghìn")', ""),
+        ],
+        mistakes=["Duyệt `for direction in plan` rồi quên tra `plan[direction]`."],
+    ),
+    "10-6": Theory(
+        concept=[
+            "Comprehension trên bản đồ: `[(x, y) for y, row in enumerate(grid) for x, t in enumerate(row) if t == \"chest\"]`.",
+            "Ô ngay DƯỚI rương (x, y) là (x, y + 1) - đứng đó và mở hướng \"up\".",
+        ],
+        starter_notes=[
+            ("grid = hero.scan()", "Bản đồ grid[y][x]."),
+            ("print(grid[1])", "Hàng 1 - nơi có các rương."),
+        ],
+        example=[
+            ('board = [["box", "floor"], ["floor", "box"]]', ""),
+            ('boxes = [(x, y) for y, row in enumerate(board) for x, t in enumerate(row) if t == "box"]', ""),
+            ("print(boxes)", "[(0, 0), (1, 1)]."),
+        ],
+        mistakes=["Đi tới đúng ô rương bằng move_to → báo lỗi vì rương chắn đường."],
+    ),
+    "11-6": Theory(
+        concept=[
+            "`thu in tap_hop` kiểm tra rất nhanh - hợp để hỏi \"thứ này có nằm trong nhóm được phép không?\".",
+            "Vòng while + if: mỗi vòng chỉ làm MỘT việc (đập hoặc bước), rồi nhìn lại.",
+        ],
+        starter_notes=[
+            ('while hero.look("right") != "exit":', "Lặp tới khi cổng ở ngay bên phải."),
+            ("    hero.move_right()", "Chỉ bước - sẽ đụng thùng."),
+        ],
+        example=[
+            ('edible = {"táo", "cam"}', ""),
+            ('for food in ["táo", "đá", "cam"]:', ""),
+            ("    if food in edible:", ""),
+            ('        print("Ăn", food)', "Ăn táo, Ăn cam."),
+        ],
+        mistakes=["Đập cả ngọc rơi ra: ngọc không thuộc breakable, cứ bước lên là nhặt."],
+    ),
+    "12-6": Theory(
+        concept=[
+            "Kết hợp nhiều vật thể: chìa → cửa khoá → cửa mật mã.",
+            "`int(math.sqrt(50))` lấy phần nguyên của căn bậc hai: 7.",
+        ],
+        starter_notes=[
+            ("import math", "Nạp thư viện."),
+            ("print(math.sqrt(4))", "In 2.0."),
+        ],
+        example=[
+            ("import math", ""),
+            ("side = math.sqrt(30)", "≈ 5.477."),
+            ("print(int(side), math.ceil(side))", "5 6."),
+        ],
+        mistakes=["Quên mở cửa khoá trước khi đi tới cửa mật mã."],
+    ),
+    "13-6": Theory(
+        concept=[
+            "`hero.try_code` trả về True khi đúng - dùng `break` để dừng thử.",
+            "Thứ tự công việc quan trọng: thùng → cửa màu → rương → cúp.",
+        ],
+        starter_notes=[
+            ("from itertools import permutations", "Nạp hàm hoán vị."),
+            ('hero.attack("right")', "Đập thùng đầu tiên."),
+        ],
+        example=[
+            ("from itertools import permutations", ""),
+            ('for order in permutations(["A", "B"]):', ""),
+            ("    print(order)", "('A', 'B'), ('B', 'A')."),
+        ],
+        mistakes=["Dùng enter_code để thử: sai là mất máu - try_code thì không."],
+    ),
+    "14-6": Theory(
+        concept=[
+            "`Counter(...)` đếm được mọi loại ô của bản đồ cùng lúc.",
+            "Trải phẳng list lồng nhau bằng generator: `(t for row in grid for t in row)`.",
+        ],
+        starter_notes=[
+            ("from collections import Counter", "Nạp Counter."),
+            ("grid = hero.scan()", "Bản đồ."),
+            ("print(grid[1])", "In hàng 1."),
+        ],
+        example=[
+            ("from collections import Counter", ""),
+            ('rows = [["a", "b"], ["a", "a"]]', ""),
+            ("print(Counter(x for row in rows for x in row))", "Counter({'a': 3, 'b': 1})."),
+        ],
+        mistakes=["Đưa thẳng grid vào Counter → lỗi vì list không làm khoá được."],
+    ),
+    "15-6": Theory(
+        concept=[
+            "Ôn lại `date.fromisoformat(...)` và `.weekday()` (0 = thứ Hai).",
+            "Mở rương bằng `hero.open_chest(huong)`.",
+        ],
+        starter_notes=[
+            ("from datetime import date", "Nạp kiểu date."),
+            ("print(day)", "In chuỗi ngày."),
+        ],
+        example=[
+            ("from datetime import date", ""),
+            ("print(date(2026, 1, 1).weekday())", "3 - thứ Năm."),
+        ],
+        mistakes=["Gọi .weekday() trên chuỗi → AttributeError; phải đổi sang date trước."],
+    ),
+    "16-6": Theory(
+        concept=[
+            "`hero.unlock` khi chưa có chìa ném `ValueError` - bắt lỗi để xử lý thay vì để chương trình dừng.",
+            "Trong `except`: sửa tình huống (đi lấy chìa) rồi thử lại.",
+        ],
+        starter_notes=[
+            ('hero.unlock("right")', "Chưa có chìa → ValueError, chương trình dừng."),
+            ("hero.move_right(4)", "Không chạy tới được."),
+        ],
+        example=[
+            ("try:", ""),
+            ('    value = int("abc")', ""),
+            ("except ValueError:", "Không đổi được..."),
+            ("    value = 0", "...dùng giá trị mặc định."),
+            ("print(value)", "0."),
+        ],
+        mistakes=["Bắt nhầm loại lỗi (ví dụ except TypeError) - lỗi vẫn làm dừng chương trình."],
+    ),
+    "17-6": Theory(
+        concept=[
+            "Class gom dữ liệu (số rương đã mở) và hành động (open) vào một chỗ.",
+            "Phương thức có thể gọi lệnh của hero và cập nhật thuộc tính của self.",
+        ],
+        starter_notes=[
+            ("class Explorer:", "Class nhà thám hiểm."),
+            ("    def __init__(self):", "Chạy khi tạo."),
+            ("        self.opened = 0", "Chưa mở rương nào."),
+        ],
+        example=[
+            ("class Counter2:", ""),
+            ("    def __init__(self):", ""),
+            ("        self.value = 0", ""),
+            ("    def click(self):", ""),
+            ("        self.value += 1", ""),
+            ("c = Counter2()", ""),
+            ("c.click()", ""),
+            ("print(c.value)", "1."),
+        ],
+        mistakes=["Quên tăng self.opened → nói sai số rương."],
+    ),
+    "18-6": Theory(
+        concept=[
+            "Một vòng lặp \"thông minh\": mỗi bước nhìn ô bên phải rồi chọn hành động phù hợp (if / elif / else).",
+            "Có thể kiểm tra thêm hướng khác (phía dưới) trong cùng vòng lặp.",
+        ],
+        starter_notes=[
+            ('while hero.look("right") != "exit":', "Lặp tới khi cổng bên phải."),
+            ("    hero.move_right()", "Chỉ bước - sẽ kẹt ở thùng."),
+        ],
+        example=[
+            ("for thing in [\"box\", \"floor\", \"lock\"]:", ""),
+            ('    if thing == "box":', ""),
+            ('        print("đập")', ""),
+            ('    elif thing == "lock":', ""),
+            ('        print("mở khoá")', ""),
+            ("    else:", ""),
+            ('        print("bước")', ""),
+        ],
+        mistakes=["Viết các if riêng lẻ: một vòng có thể vừa đập vừa bước, làm lệch vị trí."],
+    ),
+    "19-6": Theory(
+        concept=[
+            "`sorted(ds, key=lambda c: c[\"x\"])` xếp list dict theo khoá \"x\".",
+            "`reverse=True` để xếp ngược (từ phải sang trái).",
+        ],
+        starter_notes=[
+            ('chests = hero.find_objects("chest")', "List rương."),
+            ("print(chests)", "In ra để xem."),
+        ],
+        example=[
+            ('pets = [{"name": "Mèo", "age": 3}, {"name": "Chó", "age": 1}]', ""),
+            ('youngest = sorted(pets, key=lambda p: p["age"])[0]', ""),
+            ('print(youngest["name"])', "Chó."),
+        ],
+        mistakes=["key=c[\"x\"] (thiếu lambda) → lỗi NameError."],
+    ),
+    "20-6": Theory(
+        concept=[
+            "Một regex có thể lấy chữ (`\\w+`) hoặc số (`\\d+`); dùng nhiều lần cho nhiều thông tin.",
+            "Kết quả `.group(1)` luôn là chuỗi - số cần `int()`, hướng dùng thẳng được.",
+        ],
+        starter_notes=[
+            ("import re", "Nạp regex."),
+            ("print(letter)", "In mật thư."),
+        ],
+        example=[
+            ("import re", ""),
+            ('msg = "Gặp ở phòng B lúc 15 giờ"', ""),
+            ('room = re.search(r"phòng (\\w+)", msg).group(1)', "'B'."),
+            ('hour = int(re.search(r"lúc (\\d+)", msg).group(1))', "15."),
+        ],
+        mistakes=["Quên dấu cách trong mẫu (\"hướng(\\w+)\") → không khớp."],
+    ),
+    "21-6": Theory(
+        concept=[
+            "Closure tạo ra các \"bùa\" giống nhau nhưng nhớ hướng khác nhau.",
+            "Hàm cũng có thể nằm trong list: `[f, g]` rồi gọi lần lượt.",
+        ],
+        starter_notes=[
+            ("def make_opener(direction):", "Nhà máy tạo bùa mở rương."),
+            ("    pass", "Chưa tạo gì."),
+        ],
+        example=[
+            ("def make_greeter(name):", ""),
+            ("    def greet():", ""),
+            ('        print("Chào", name)', ""),
+            ("    return greet", ""),
+            ('for g in [make_greeter("An"), make_greeter("Bình")]:', ""),
+            ("    g()", "Chào An, Chào Bình."),
+        ],
+        mistakes=["Gọi make_opener(\"up\") mà không gọi hàm nó trả về → rương chưa mở."],
+    ),
+    "22-6": Theory(
+        concept=[
+            "`np.array(bang).max()` tìm số lớn nhất trong cả bảng 2 chiều.",
+            "Kết quả là số của NumPy - `int(...)` để dùng làm mật mã.",
+        ],
+        starter_notes=[
+            ("import numpy as np", "Nạp NumPy."),
+            ("print(np.array(weights).shape)", "In (2, 2)."),
+        ],
+        example=[
+            ("import numpy as np", ""),
+            ("scores = np.array([[5, 9], [7, 6]])", ""),
+            ("print(scores.max(), scores.min())", "9 5."),
+        ],
+        mistakes=["max(weights) với list lồng nhau so sánh cả hàng - không ra số lớn nhất."],
+    ),
+    "23-6": Theory(
+        concept=[
+            "Gỡ lỗi chương trình có vật thể: kiểm tra THỨ TỰ (nhặt chìa trước khi mở), TÊN lệnh, và HƯỚNG.",
+            "Đọc thông báo lỗi ở Bảng tin để biết dòng nào sai, sửa từng lỗi rồi chạy lại.",
+        ],
+        starter_notes=[
+            ('hero.unlock("right")', "Chưa có chìa mà đã mở cửa."),
+            ("hero.move_right(2)", "Đi qua chìa."),
+            ('hero.open_chests("down")', "Tên lệnh có đúng không?"),
+            ('hero.attack("left")', "Thùng nằm ở hướng nào?"),
+            ("hero.move_right(3)", "Đi tới cúp."),
+        ],
+        example=[
+            ("hero.move_right()", "Ví dụ code ĐÚNG thứ tự: nhặt chìa..."),
+            ('hero.unlock("right")', "...rồi mới mở cửa."),
+        ],
+        mistakes=["Sửa xong một lỗi là dừng - hãy chạy lại để tìm lỗi tiếp theo."],
+    ),
+})
+
 THEORY.update(PRACTICE_THEORY)
 
 
@@ -6106,6 +7000,8 @@ THEORY.update(PRACTICE_THEORY)
 
 STAR_COINS = 10
 WORLD_CHEST_COINS = 50
+# Xu trong mỗi rương báu mở được TRONG màn (chỉ tính lần đầu).
+LOOT_COINS = 5
 DEFAULT_SKIN = "skin1"
 
 RANKS: list[tuple[int, str]] = [
@@ -6146,6 +7042,7 @@ class RewardSummary:
     new_stars: int
     coins: int
     chest_world: int | None = None
+    loot_coins: int = 0
     old_rank: str = ""
     new_rank: str = ""
     notes: list[str] = field(default_factory=list)
@@ -6185,7 +7082,7 @@ def total_stars(progress: object) -> int:
 
 
 def apply_win(progress: object, level: Level, world_levels: list[Level], world_number: int,
-              flags: tuple[bool, bool, bool]) -> RewardSummary:
+              flags: tuple[bool, bool, bool], chests_opened: int = 0) -> RewardSummary:
     """Record a win: keep the best stars, pay coins for NEW stars and open the world chest once."""
     stars: dict[str, int] = progress.stars  # type: ignore[attr-defined]
     earned = sum(flags)
@@ -6195,6 +7092,11 @@ def apply_win(progress: object, level: Level, world_levels: list[Level], world_n
     stars[level.id] = max(previous, earned)
     progress.completed.add(level.id)  # type: ignore[attr-defined]
     coins = new_stars * STAR_COINS
+    loot: dict[str, int] = progress.loot  # type: ignore[attr-defined]
+    new_loot = max(0, chests_opened - loot.get(level.id, 0))
+    loot[level.id] = max(loot.get(level.id, 0), chests_opened)
+    loot_coins = new_loot * LOOT_COINS
+    coins += loot_coins
 
     chest_world = None
     completed = progress.completed  # type: ignore[attr-defined]
@@ -6206,7 +7108,7 @@ def apply_win(progress: object, level: Level, world_levels: list[Level], world_n
 
     progress.coins += coins  # type: ignore[attr-defined]
     new_rank = rank_for(total_stars(progress))[0]
-    return RewardSummary(flags, new_stars, coins, chest_world, old_rank, new_rank)
+    return RewardSummary(flags, new_stars, coins, chest_world, loot_coins, old_rank, new_rank)
 
 
 # ---------------------------------------------------------------- shop
@@ -6338,12 +7240,16 @@ HERO_MEMBERS: list[Suggestion] = [
     _call("use", "item", "Dùng vật có thuộc tính power để hồi máu"),
     _call("move_by", "vector", "Đi theo đối tượng có x, y"),
     _call("follow", "path", "Đi theo từng hướng trong lộ trình"),
+    _call("unlock", "direction", "Dùng 1 chìa mở cửa khoá bên cạnh"),
+    _call("open_chest", "direction", "Mở rương báu bên cạnh (+xu)"),
+    _call("find_objects", "name", "Toạ độ vật thể: \"box\", \"chest\", \"key\", \"lock\"..."),
     _plain("position", "Toạ độ hiện tại (x, y)"),
     _plain("exit_position", "Toạ độ cổng (x, y)"),
     _plain("hp", "Số máu hiện tại"),
     _plain("x", "Cột hiện tại"),
     _plain("y", "Hàng hiện tại"),
     _plain("gems_collected", "Số ngọc đã nhặt"),
+    _plain("keys", "Số chìa khoá đang có"),
 ]
 
 BUILTIN_FUNCTIONS: list[Suggestion] = [
@@ -7582,6 +8488,14 @@ class Assets:
             }
 
         self.gems = {color: strip(f"3 Objects/Gems/{color}.png", 16, 2.5) for color in range(1, 7)}
+        # Thùng gỗ: 1 = thùng thường (O), 2 = thùng có ngọc (Q).
+        self.crates = {
+            number: {
+                "idle": strip(f"3 Objects/Boxes/{number}_Idle.png", 32, 1.5),
+                "break": strip(f"3 Objects/Boxes/{number}_Break.png", 32, 1.5),
+            }
+            for number in (1, 2)
+        }
         self.trophy = strip("3 Objects/Checkpoints/End_Idle.png", 64, 0.95)
         self.spike = strip("6 Traps/4.png", 48, 1.0)[4]
         self.backgrounds = {
@@ -7727,6 +8641,57 @@ class Confetti:
         surface.set_clip(previous)
 
 
+def draw_key(surface: pygame.Surface, center: tuple[int, int], size: int) -> None:
+    """Small golden key, about 2 * size pixels wide."""
+    x, y = center
+    ring = max(3, size // 2)
+    pygame.draw.circle(surface, GOLD_DARK, (x - size // 2, y), ring + 2)
+    pygame.draw.circle(surface, GOLD, (x - size // 2, y), ring)
+    pygame.draw.circle(surface, GOLD_DARK, (x - size // 2, y), max(1, ring // 2))
+    shaft = pygame.Rect(x - size // 2 + ring, y - 2, size + ring, 5)
+    pygame.draw.rect(surface, GOLD, shaft)
+    pygame.draw.rect(surface, GOLD, (shaft.right - 5, y + 2, 4, 6))
+    pygame.draw.rect(surface, GOLD, (shaft.right - 12, y + 2, 4, 5))
+
+
+def draw_lock_door(surface: pygame.Surface, rect: pygame.Rect) -> None:
+    """Wooden door with a golden padlock (opened with hero.unlock)."""
+    pygame.draw.rect(surface, (110, 70, 40), rect)
+    for offset in (rect.width // 3, 2 * rect.width // 3):
+        pygame.draw.line(surface, (80, 48, 26), (rect.x + offset, rect.y + 2), (rect.x + offset, rect.bottom - 2), 2)
+    pygame.draw.rect(surface, (70, 42, 22), rect, width=3)
+    body = pygame.Rect(0, 0, rect.width // 2, rect.height // 3)
+    body.center = (rect.centerx, rect.centery + rect.height // 10)
+    pygame.draw.arc(surface, (200, 200, 210), body.inflate(-6, 10).move(0, -body.height // 2), 0, 3.2, 3)
+    pygame.draw.rect(surface, GOLD, body, border_radius=3)
+    pygame.draw.circle(surface, (60, 40, 20), (body.centerx, body.centery - 1), 3)
+    pygame.draw.rect(surface, (60, 40, 20), (body.centerx - 1, body.centery, 3, 6))
+
+
+def draw_chest(surface: pygame.Surface, rect: pygame.Rect, opened: bool, time_value: float = 0.0) -> None:
+    """Treasure chest; when opened the lid is up and gold sparkles."""
+    base = pygame.Rect(rect.x + 4, rect.y + rect.height // 2, rect.width - 8, rect.height // 2 - 4)
+    pygame.draw.rect(surface, (140, 82, 40), base, border_radius=4)
+    pygame.draw.rect(surface, (90, 50, 24), base, width=2, border_radius=4)
+    if opened:
+        pygame.draw.ellipse(surface, GOLD, (base.x + 4, base.y - 6, base.width - 8, 12))
+        lid = pygame.Rect(base.x, base.y - rect.height // 3 - 6, base.width, rect.height // 4)
+        pygame.draw.rect(surface, (120, 70, 34), lid, border_radius=4)
+        pygame.draw.rect(surface, (90, 50, 24), lid, width=2, border_radius=4)
+        for index in range(3):
+            angle = time_value * 3 + index * 2.1
+            sparkle = (int(base.centerx + math.cos(angle) * 12), int(base.y - 10 + math.sin(angle * 1.3) * 6))
+            pygame.draw.circle(surface, (255, 245, 180), sparkle, 2)
+    else:
+        lid = pygame.Rect(base.x, base.y - rect.height // 4, base.width, rect.height // 4 + 2)
+        pygame.draw.rect(surface, (160, 96, 46), lid, border_top_left_radius=8, border_top_right_radius=8)
+        pygame.draw.rect(surface, (90, 50, 24), lid, width=2, border_top_left_radius=8, border_top_right_radius=8)
+    band = pygame.Rect(base.centerx - 4, base.y - (0 if opened else rect.height // 4), 8, base.height + (0 if opened else rect.height // 4))
+    pygame.draw.rect(surface, GOLD, band)
+    if not opened:
+        pygame.draw.rect(surface, GOLD_DARK, (base.centerx - 5, base.y - 3, 10, 8), border_radius=2)
+
+
 # ======================================================================
 # sound.py
 # ======================================================================
@@ -7832,6 +8797,7 @@ class Progress:
         self.owned: set[str] = set()
         self.skin = "skin1"
         self.chests: set[int] = set()
+        self.loot: dict[str, int] = {}
         self.muted = False
         self.restored_from_backup = False
         self._load()
@@ -7867,6 +8833,9 @@ class Progress:
         self.chests |= {int(world) for world in data.get("chests", []) if str(world).isdigit()}
         if self.skin == "skin1" and isinstance(data.get("skin"), str):
             self.skin = data["skin"]
+        for level_id, count in dict(data.get("loot", {})).items():
+            if isinstance(count, int):
+                self.loot[str(level_id)] = max(self.loot.get(str(level_id), 0), count)
         if isinstance(data.get("muted"), bool):
             self.muted = data["muted"]
         self._migrate_old_wins()
@@ -7892,6 +8861,7 @@ class Progress:
             "owned": sorted(self.owned),
             "skin": self.skin,
             "chests": sorted(self.chests),
+            "loot": self.loot,
             "muted": self.muted,
         }
         return json.dumps(data, ensure_ascii=False, indent=2)
@@ -8078,8 +9048,8 @@ MENU_TAB_Y = 132
 MENU_TAB_WIDTH = 224
 MENU_WORLDS_Y = 340
 MENU_ROWS_PER_COLUMN = 5
-MENU_LEVELS_OFFSET = 250
-MENU_LEVEL_WIDTH = 58
+MENU_LEVELS_OFFSET = 232
+MENU_LEVEL_WIDTH = 52
 INFO_RECT = pygame.Rect(768, 64, 496, 196)
 EDITOR_RECT = pygame.Rect(768, 270, 496, 372)
 BUTTON_Y = 652
@@ -8103,6 +9073,11 @@ EVENT_DURATIONS: dict[str, float] = {
     "hurt": 0.4,
     "heal": 0.5,
     "shield": 0.4,
+    "box_break": 0.3,
+    "gem_reveal": 0.15,
+    "key": 0.15,
+    "unlock": 0.35,
+    "chest_open": 0.5,
     "gem": 0.05,
     "door_open": 0.3,
     "jam": 0.35,
@@ -8208,6 +9183,12 @@ class Playback:
         self.gems = dict(world.gems)
         self.enemies = {pos: enemy.kind for pos, enemy in world.enemies.items()}
         self.doors = dict(world.doors)
+        self.crates = dict(world.crates)
+        self.keys_on_map = set(world.keys_on_map)
+        self.locks = set(world.locks)
+        self.chests = dict(world.chests)
+        self.hero_keys = 0
+        self.breaking: dict[tuple[int, int], tuple[bool, float]] = {}
         self.dying_enemies: dict[tuple[int, int], tuple[str, float]] = {}
         self.enemy_flash: dict[tuple[int, int], float] = {}
         self.door_shake: dict[tuple[int, int], float] = {}
@@ -8323,6 +9304,31 @@ class Playback:
         elif kind == "die":
             self._set_hero_state("hit")
             self.dead = True
+        elif kind == "box_break":
+            position = tuple(event["pos"])
+            has_gem = self.crates.pop(position, False)
+            self.breaking[position] = (has_gem, 0.4)
+            self.sound("hit")
+        elif kind == "gem_reveal":
+            self.gems[tuple(event["pos"])] = event["color"]
+            log("Thùng vỡ, lộ ra một viên ngọc!", COLOR_ACCENT)
+        elif kind == "key":
+            self.keys_on_map.discard(tuple(event["pos"]))
+            self.hero_keys = event["keys"]
+            self._float("+1 chìa", COLOR_ACCENT, pygame.Vector2(event["pos"]))
+            log(f"Nhặt được chìa khoá (đang có {self.hero_keys}).", COLOR_ACCENT)
+            self.sound("coin")
+        elif kind == "unlock":
+            self.locks.discard(tuple(event["pos"]))
+            self.hero_keys = event["keys"]
+            log("Đã mở cửa khoá!", COLOR_GOOD)
+            self.sound("door")
+        elif kind == "chest_open":
+            position = tuple(event["pos"])
+            self.chests[position] = True
+            self._float(f"+{LOOT_COINS} xu", COLOR_ACCENT, pygame.Vector2(position))
+            log(f"Mở rương báu: +{LOOT_COINS} xu (nhận khi qua màn).", COLOR_ACCENT)
+            self.sound("chest")
 
     def _progress(self, event: dict[str, Any], fraction: float) -> None:
         if event["type"] == "move":
@@ -8355,6 +9361,13 @@ class Playback:
                 table[key] -= delta_seconds
                 if table[key] <= 0:
                     del table[key]
+        for key in list(self.breaking):
+            has_gem, remaining = self.breaking[key]
+            remaining -= delta_seconds
+            if remaining <= 0:
+                del self.breaking[key]
+            else:
+                self.breaking[key] = (has_gem, remaining)
         for key in list(self.dying_enemies):
             kind, remaining = self.dying_enemies[key]
             remaining -= delta_seconds
@@ -8672,7 +9685,7 @@ class App:
             self.log("[OK] " + result.message, COLOR_GOOD)
             world = world_of(self.level.id)
             flags = star_flags(result, self.level.id)
-            summary = apply_win(self.progress, self.level, world.levels, world.number, flags)
+            summary = apply_win(self.progress, self.level, world.levels, world.number, flags, result.chests_opened)
             self.progress.save()
             self.win_summary = summary
             self.win_time = 0.0
@@ -8941,6 +9954,20 @@ class App:
             image = self.assets.door_locked if kind == "locked" else self.assets.door_jammed
             self.screen.blit(image, (origin_x + x * TILE + shake, origin_y + y * TILE))
 
+        for (x, y), has_gem in playback.crates.items():
+            self._blit_on_tile(self.assets.crates[2 if has_gem else 1]["idle"][0], x, y)
+        for (x, y), (has_gem, remaining) in playback.breaking.items():
+            image = self.assets.crates[2 if has_gem else 1]["break"][0].copy()
+            image.set_alpha(int(255 * remaining / 0.4))
+            self._blit_on_tile(image, x, y)
+        for x, y in playback.locks:
+            draw_lock_door(self.screen, pygame.Rect(origin_x + x * TILE, origin_y + y * TILE, TILE, TILE))
+        for (x, y), opened in playback.chests.items():
+            draw_chest(self.screen, pygame.Rect(origin_x + x * TILE, origin_y + y * TILE, TILE, TILE), opened, self.time)
+        for x, y in playback.keys_on_map:
+            bob = int(3 * pygame.math.Vector2(0, 1).rotate(self.time * 200 + x * 30).y)
+            draw_key(self.screen, (origin_x + x * TILE + TILE // 2, origin_y + y * TILE + TILE // 2 + bob), 12)
+
         for (x, y), color in playback.gems.items():
             bob = 3 * pygame.math.Vector2(0, 1).rotate(self.time * 180 + x * 40).y
             rect = self._blit_on_tile(self._frame(self.assets.gems[color], 10), x, y - 0.15)
@@ -8997,8 +10024,15 @@ class App:
             color = COLOR_BAD if index < self.playback.hp else (70, 70, 90)
             heart = self.font_bold.render("♥", True, color)
             self.screen.blit(heart, (VIEW_RECT.x + 12 + index * 24, VIEW_RECT.y + 8))
+        next_x = VIEW_RECT.x + 24 + self.playback.max_hp * 24
         if self.playback.shield:
-            draw_shield(self.screen, (VIEW_RECT.x + 24 + self.playback.max_hp * 24, VIEW_RECT.y + 20), 8)
+            draw_shield(self.screen, (next_x, VIEW_RECT.y + 20), 8)
+            next_x += 26
+        world = self.playback.terrain_world
+        if world.keys_on_map or world.locks:
+            draw_key(self.screen, (next_x + 6, VIEW_RECT.y + 20), 10)
+            count = self.font_bold.render(f"x{self.playback.hero_keys}", True, COLOR_ACCENT)
+            self.screen.blit(count, (next_x + 26, VIEW_RECT.y + 8))
         collected = len(self.playback.terrain_world.gems) - len(self.playback.gems)
         total = len(self.playback.terrain_world.gems)
         if total:
@@ -9050,6 +10084,8 @@ class App:
 
         draw_coin(self.screen, (panel.x + 48, y + 16), 11)
         coin_text = f"+{summary.coins} xu" if summary.coins else "Không có xu mới (đã nhận ở lần trước)"
+        if summary.loot_coins:
+            coin_text += f"  (rương: +{summary.loot_coins})"
         self.screen.blit(self.font_bold.render(coin_text, True, COLOR_ACCENT), (panel.x + 66, y + 4))
         y += 34
         if summary.chest_world is not None:

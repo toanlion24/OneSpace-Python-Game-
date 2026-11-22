@@ -8,7 +8,7 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
 đi đường, nhặt ngọc, hạ quái, giải mật mã mở cửa. Code chạy xong, nhân vật diễn lại từng bước
 để các em thấy ngay chương trình của mình đúng hay sai ở đâu.
 
-- **115 màn, 5 giai đoạn, mỗi World 5 bài**: đi từ câu lệnh đầu tiên tới thư viện chuẩn, class, lập trình hàm, NumPy và gỡ lỗi.
+- **138 màn, 5 giai đoạn, mỗi World 6 bài** (5 bài + 1 Thử thách): đi từ câu lệnh đầu tiên tới thư viện chuẩn, class, lập trình hàm, NumPy và gỡ lỗi.
 - **Lý thuyết đi kèm từng màn**: khái niệm, đề bài, dữ liệu có sẵn, giải thích từng dòng code ban đầu,
   ví dụ minh hoạ (khác lời giải) và các lỗi hay gặp.
 - **Tự suy nghĩ**: game không hiện lời giải; nút Gợi ý chỉ gợi hướng.
@@ -21,7 +21,9 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
 - **Chơi như game thật**:
   - Mỗi màn có **3 sao**: qua màn · không mất máu · code gọn (không vượt quá số dòng cho phép).
   - Sao mới đạt được đổi ra **xu**; tổng sao quyết định **cấp bậc** (Tân binh → Huyền thoại OneSpace).
-  - Qua đủ 5 màn một World thì **mở rương báu**: nhận **huy hiệu chiến thắng** + xu thưởng.
+  - **Vật thể trong màn**: thùng gỗ phải đập vỡ (có thùng giấu ngọc), chìa khoá mở cửa khoá,
+    rương báu mở ra được thêm xu.
+  - Qua hết các màn một World thì **mở rương báu**: nhận **huy hiệu chiến thắng** + xu thưởng.
   - **Cửa hàng**: dùng xu mua nhân vật (Rô-bốt Vàng, Cáo Lửa), Tim thêm (+1 máu), Khiên gỗ (đỡ đòn đầu tiên).
   - Hiệu ứng pháo giấy, âm thanh (bật/tắt được).
 
@@ -75,9 +77,9 @@ Python 3.14 dùng `pygame-ce` (bản `pygame` gốc chưa có wheel cho 3.14).
 | `hero.move_up/down/left/right(steps=1)` | Đi theo hướng |
 | `hero.move_to(x, y)` | Tự tìm đường tới ô (x, y) |
 | `hero.say(text)` / `print(...)` | Nói / in ra bảng tin |
-| `hero.look(direction)` | `"wall"`, `"floor"`, `"gem"`, `"enemy"`, `"spike"`, `"door"`, `"exit"` |
+| `hero.look(direction)` | `"wall"`, `"floor"`, `"gem"`, `"enemy"`, `"spike"`, `"door"`, `"exit"`, `"box"`, `"key"`, `"lock"`, `"chest"` |
 | `hero.scan()` | Bản đồ dạng list lồng nhau `grid[y][x]` |
-| `hero.attack(direction=None, weapon=None)` | Đánh ô bên cạnh |
+| `hero.attack(direction=None, weapon=None)` | Đánh quái / đập thùng gỗ ở ô bên cạnh |
 | `hero.attack_target(x, y, weapon=None)` | Đi tới cạnh quái rồi đánh |
 | `hero.enter_code(value)` | Nhập mật mã cho cửa bên cạnh (sai thì mất máu) |
 | `hero.try_code(value)` | Thử mật mã không mất máu, trả về True/False |
@@ -86,6 +88,10 @@ Python 3.14 dùng `pygame-ce` (bản `pygame` gốc chưa có wheel cho 3.14).
 | `hero.move_by(vector)` | Đi theo đối tượng có `x`, `y` |
 | `hero.follow(path)` | Đi theo từng hướng trong một thứ duyệt được |
 | `hero.find_gems()` / `hero.find_enemies()` | List dict `{"x", "y", "color"/"type"}` |
+| `hero.unlock(direction)` | Dùng 1 chìa mở cửa khoá (chưa có chìa thì ném `ValueError`) |
+| `hero.open_chest(direction)` | Mở rương báu bên cạnh (+xu khi qua màn) |
+| `hero.find_objects(name)` | List dict `{"x", "y"}` của `"box"`, `"chest"`, `"key"`, `"lock"`, ... |
+| `hero.keys` | Số chìa khoá đang có |
 | `hero.position`, `hero.exit_position`, `hero.hp` | Thông tin |
 
 Được `import`: `math`, `itertools`, `collections`, `datetime`, `re`, `functools`, `operator`,
@@ -108,7 +114,7 @@ Khi có file này: `python -m pytest` kiểm tra mọi lời giải thắng, và
 main.py                   Điểm khởi chạy
 codequest/engine.py       Luật chơi + chạy code người chơi an toàn (không phụ thuộc pygame)
 codequest/levels.py       5 giai đoạn, 23 world, 2-3 bài chính mỗi world (bản đồ ASCII, code ban đầu, gợi ý)
-codequest/levels_practice.py  Bài luyện tập thêm để mỗi world đủ 5 bài
+codequest/levels_practice.py  Bài luyện tập thêm + màn Thử thách (mỗi world 6 bài)
 codequest/theory_practice.py  Lý thuyết cho bài luyện tập
 codequest/theory.py       Lý thuyết từng màn
 codequest/game.py         Giao diện: menu theo giai đoạn, bản đồ, phát lại hoạt ảnh, bảng tin

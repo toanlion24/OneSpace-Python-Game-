@@ -59,7 +59,7 @@ def test_world_chest_opens_once(tmp_path):
     assert [summary.chest_world for summary in summaries] == [None] * (len(world.levels) - 1) + [world.number]
     replay = rewards.apply_win(progress, world.levels[0], world.levels, world.number, (True, True, True))
     assert replay.chest_world is None
-    assert progress.coins == 15 * rewards.STAR_COINS + rewards.WORLD_CHEST_COINS
+    assert progress.coins == 3 * len(world.levels) * rewards.STAR_COINS + rewards.WORLD_CHEST_COINS
 
 
 def test_rank_progression():

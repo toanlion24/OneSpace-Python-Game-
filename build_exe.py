@@ -33,6 +33,7 @@ KIT_FOLDERS_USED = [
     "1 Main Characters",
     "2 Locations/Backgrounds",
     "2 Locations/Tiles/Tileset.png",
+    "3 Objects/Boxes",
     "3 Objects/Checkpoints",
     "3 Objects/Gems",
     "4 Enemies",
@@ -44,7 +45,7 @@ GUIDE = f"""ONESPACE CODEQUEST - HỌC PYTHON QUA TRÒ CHƠI (v{__version__})
 ==============================================================
 
 Trò chơi học lập trình: viết code Python để đưa nhân vật vượt màn.
-115 màn chia 5 giai đoạn (mỗi World 5 bài), từ câu lệnh đầu tiên tới NumPy và gỡ lỗi.
+138 màn chia 5 giai đoạn (mỗi World 5 bài + 1 Thử thách), từ câu lệnh đầu tiên tới NumPy và gỡ lỗi.
 Dành cho học sinh THCS - THPT.
 
 CÁCH MỞ GAME
@@ -64,7 +65,9 @@ CÁCH CHƠI
 
 PHẦN THƯỞNG
 - Mỗi màn 3 sao: qua màn, không mất máu, code gọn (không vượt số dòng cho phép).
-- Sao mới đổi ra xu. Qua đủ 5 màn một World: mở rương, nhận huy hiệu và xu.
+- Sao mới đổi ra xu. Qua hết các màn một World: mở rương, nhận huy hiệu và xu.
+- Trong màn có thùng gỗ (đập bằng hero.attack), chìa khoá + cửa khoá (hero.unlock)
+  và rương báu (hero.open_chest) - mỗi rương mở được thêm xu.
 - Menu > "Cửa hàng & Huy hiệu": mua nhân vật, Tim thêm, Khiên gỗ; xem huy hiệu và cấp bậc.
 
 KHUNG CODE

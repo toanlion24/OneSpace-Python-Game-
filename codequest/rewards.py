@@ -18,6 +18,8 @@ from .par import PAR
 
 STAR_COINS = 10
 WORLD_CHEST_COINS = 50
+# Xu trong mỗi rương báu mở được TRONG màn (chỉ tính lần đầu).
+LOOT_COINS = 5
 DEFAULT_SKIN = "skin1"
 
 RANKS: list[tuple[int, str]] = [
@@ -58,6 +60,7 @@ class RewardSummary:
     new_stars: int
     coins: int
     chest_world: int | None = None
+    loot_coins: int = 0
     old_rank: str = ""
     new_rank: str = ""
     notes: list[str] = field(default_factory=list)
@@ -97,7 +100,7 @@ def total_stars(progress: object) -> int:
 
 
 def apply_win(progress: object, level: Level, world_levels: list[Level], world_number: int,
-              flags: tuple[bool, bool, bool]) -> RewardSummary:
+              flags: tuple[bool, bool, bool], chests_opened: int = 0) -> RewardSummary:
     """Record a win: keep the best stars, pay coins for NEW stars and open the world chest once."""
     stars: dict[str, int] = progress.stars  # type: ignore[attr-defined]
     earned = sum(flags)
@@ -107,6 +110,11 @@ def apply_win(progress: object, level: Level, world_levels: list[Level], world_n
     stars[level.id] = max(previous, earned)
     progress.completed.add(level.id)  # type: ignore[attr-defined]
     coins = new_stars * STAR_COINS
+    loot: dict[str, int] = progress.loot  # type: ignore[attr-defined]
+    new_loot = max(0, chests_opened - loot.get(level.id, 0))
+    loot[level.id] = max(loot.get(level.id, 0), chests_opened)
+    loot_coins = new_loot * LOOT_COINS
+    coins += loot_coins
 
     chest_world = None
     completed = progress.completed  # type: ignore[attr-defined]
@@ -118,7 +126,7 @@ def apply_win(progress: object, level: Level, world_levels: list[Level], world_n
 
     progress.coins += coins  # type: ignore[attr-defined]
     new_rank = rank_for(total_stars(progress))[0]
-    return RewardSummary(flags, new_stars, coins, chest_world, old_rank, new_rank)
+    return RewardSummary(flags, new_stars, coins, chest_world, loot_coins, old_rank, new_rank)
 
 
 # ---------------------------------------------------------------- shop
