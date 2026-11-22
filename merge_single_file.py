@@ -30,6 +30,8 @@ MODULE_ORDER = [
     "display",
     "completion",
     "editor",
+    "glossary",
+    "lessons",
     "theory_view",
     "assets",
     "hud",

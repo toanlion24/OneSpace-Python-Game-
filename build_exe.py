@@ -57,6 +57,8 @@ CÁCH MỞ GAME
 
 CÁCH CHƠI
 - Chọn giai đoạn và màn ở menu, đọc phần Lý thuyết, viết code ở khung bên phải.
+- Lý thuyết có mục "Từ khó trong bài" và "Hiểu kỹ hơn". Muốn chép: kéo chuột chọn dòng
+  rồi Ctrl+C, hoặc bấm nút Sao chép (chưa chọn thì chép cả bài).
 - Bấm Chạy (hoặc Ctrl+Enter) để hero làm theo code của bạn.
 - Gợi ý: gợi hướng suy nghĩ khi bị bí.
 - Bản đồ kiểm tra ẩn: nhiều màn thử code của bạn trên một bản đồ dài hơn hoặc dữ liệu khác.

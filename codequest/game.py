@@ -47,6 +47,7 @@ from .hud import (
     make_soft_ellipse,
     make_vignette,
 )
+from .lessons import lesson_for_world
 from .levels import STAGES, WORLDS, all_levels, world_of
 from .music import MusicPlayer, track_for_world
 from .music_view import AUTO_TRACK, MusicPanel
@@ -706,6 +707,7 @@ class App:
             rect=THEORY_RECT,
             inputs=level.extra_globals,
             goal=level.goal,
+            lesson=lesson_for_world(world.number),
         )
         self.show_theory = level.id not in self.progress.completed
         self._build_play_buttons()
@@ -864,6 +866,11 @@ class App:
             outcome = self.theory_view.handle_event(event)
             if outcome == "close":
                 self.show_theory = False
+                return
+            if outcome == "copied":
+                line_count = self.theory_view.copied_line_count
+                self.show_toast(f"Đã chép {line_count} dòng lý thuyết - dán bằng Ctrl+V.", 3.0)
+                self.sound.play("click")
                 return
             if outcome == "used":
                 return

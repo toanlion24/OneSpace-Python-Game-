@@ -9,8 +9,10 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
 để các em thấy ngay chương trình của mình đúng hay sai ở đâu.
 
 - **138 màn, 5 giai đoạn, mỗi World 6 bài** (5 bài + 1 Thử thách): đi từ câu lệnh đầu tiên tới thư viện chuẩn, class, lập trình hàm, NumPy và gỡ lỗi.
-- **Lý thuyết đi kèm từng màn**: khái niệm, đề bài, dữ liệu có sẵn, giải thích từng dòng code ban đầu,
-  ví dụ minh hoạ (khác lời giải) và các lỗi hay gặp.
+- **Lý thuyết đi kèm từng màn**: khái niệm, **Từ khó trong bài** (giải thích thuật ngữ bằng lời đời thường),
+  đề bài, dữ liệu có sẵn, giải thích từng dòng code ban đầu, mục **Hiểu kỹ hơn** của từng World (hình dung
+  đời thường, mẫu câu lệnh, chạy thử từng dòng, mẹo nhớ), ví dụ minh hoạ (khác lời giải) và các lỗi hay gặp.
+- **Chép được lý thuyết**: kéo chuột chọn dòng rồi Ctrl+C, hoặc nút Sao chép (chưa chọn thì chép cả bài).
 - **Tự suy nghĩ**: game không hiện lời giải; nút Gợi ý chỉ gợi hướng.
 - **Bản đồ kiểm tra ẩn**: nhiều màn chạy thêm code trên bản đồ dài hơn hoặc dữ liệu khác;
   code "gõ cứng" (đếm ô, gõ thẳng đáp án) sẽ bị phát hiện, và game diễn lại bản đồ ẩn để em thấy sai ở đâu.
@@ -127,6 +129,8 @@ codequest/levels.py       5 giai đoạn, 23 world, 2-3 bài chính mỗi world 
 codequest/levels_practice.py  Bài luyện tập thêm + màn Thử thách (mỗi world 6 bài)
 codequest/theory_practice.py  Lý thuyết cho bài luyện tập
 codequest/theory.py       Lý thuyết từng màn
+codequest/lessons.py      Mục "Hiểu kỹ hơn" cho từng World
+codequest/glossary.py     Từ điển thuật ngữ (tự hiện "Từ khó trong bài")
 codequest/game.py         Giao diện: menu theo giai đoạn, bản đồ, phát lại hoạt ảnh, bảng tin
 codequest/editor.py       Trình soạn code (tô màu, tự thụt lề, bôi đen, copy/paste, undo, Telex)
 codequest/completion.py   Gợi ý code khi gõ
@@ -137,7 +141,7 @@ codequest/store_view.py   Màn Bộ sưu tập & Cửa hàng
 codequest/hud.py          Vẽ sao, xu, huy hiệu, pháo giấy
 codequest/sound.py        Âm thanh tạo bằng code
 codequest/telex.py        Bộ gõ tiếng Việt Telex
-codequest/theory_view.py  Khung lý thuyết cuộn được
+codequest/theory_view.py  Khung lý thuyết cuộn được, chọn và chép được
 codequest/display.py      Co giãn khung hình theo cửa sổ
 codequest/assets.py       Nạp đồ hoạ và logo
 codequest/selftest.py     Tự kiểm tra mọi màn (cần lời giải riêng của giáo viên)

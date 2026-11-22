@@ -8381,18 +8381,883 @@ class CodeEditor:
 
 
 # ======================================================================
+# glossary.py
+# ======================================================================
+
+MAX_TERMS_PER_LEVEL = 12
+MIN_TERMS_BEFORE_BASIC = 3
+
+
+@dataclass(frozen=True)
+class GlossaryTerm:
+    term: str
+    patterns: tuple[str, ...]
+    meaning: str
+    basic: bool = False
+
+    def first_position(self, text: str) -> int:
+        """Vị trí đầu tiên thuật ngữ xuất hiện trong text, -1 nếu không có."""
+        positions = []
+        for pattern in self.patterns:
+            match = re.search(rf"(?<!\w){pattern}(?!\w)", text, flags=re.IGNORECASE)
+            if match:
+                positions.append(match.start())
+        if not positions:
+            return -1
+        return min(positions)
+
+
+def _term(term: str, patterns: list[str], meaning: str, basic: bool = False) -> GlossaryTerm:
+    return GlossaryTerm(term, tuple(patterns), meaning, basic)
+
+
+GLOSSARY: list[GlossaryTerm] = [
+    # ------------------------------------------------------------ từ rất cơ bản: chỉ hiện khi bài có ít từ khó
+    _term("Chương trình", ["chương trình"],
+          "Danh sách lệnh viết cho máy tính làm theo, chạy lần lượt từ dòng trên xuống dòng dưới.", basic=True),
+    _term("Lệnh", ["lệnh"],
+          "Một việc cụ thể bảo máy làm, thường viết trên một dòng, ví dụ hero.move_right(2).", basic=True),
+    _term("Hướng", ["hướng", "huong"],
+          "Một trong 4 chuỗi \"up\", \"down\", \"left\", \"right\" (lên, xuống, trái, phải), đặt trong dấu nháy.",
+          basic=True),
+    # ------------------------------------------------------------ nhập môn
+    _term("Tham số", ["tham số", "đối số"],
+          "Thông tin thêm bạn đưa cho lệnh, đặt trong ngoặc ( ). Như gọi món \"cho 2 cốc trà\" thì số 2 là tham số."),
+    _term("Cú pháp / SyntaxError", ["cú pháp", "SyntaxError"],
+          "Cú pháp là \"ngữ pháp\" của Python. Viết sai ngữ pháp (thiếu dấu :, thiếu ngoặc, thiếu dấu nháy) thì "
+          "Python không hiểu và báo SyntaxError, chưa chạy dòng nào."),
+    _term("Chuỗi (str)", ["chuỗi", "string", "str"],
+          "Một đoạn chữ nằm trong dấu nháy, như \"Xin chào\". Python coi nó là CHỮ, kể cả \"123\" cũng là chữ "
+          "chứ không phải số."),
+    _term("Toạ độ (x, y)", ["toạ độ"],
+          "Cặp số chỉ vị trí một ô: x đếm từ trái sang phải, y đếm từ trên xuống dưới, cả hai bắt đầu từ 0."),
+    _term("print", ["print"],
+          "Lệnh in thông tin ra Bảng tin. Dùng để XEM giá trị đang có - rất hữu ích khi tìm lỗi."),
+    _term("Thụt lề", ["thụt lề", "thụt vào", "thụt đầu dòng", "IndentationError"],
+          "Đẩy dòng code lùi vào 4 dấu cách. Python nhìn thụt lề để biết dòng nào nằm TRONG if, for, def. "
+          "Thụt lề lộn xộn thì báo IndentationError."),
+    _term("Khối lệnh", ["khối lệnh", "khối"],
+          "Nhóm các dòng thụt vào cùng mức, nằm ngay dưới một dòng kết thúc bằng dấu :. Cả nhóm \"thuộc về\" dòng đó."),
+    # ------------------------------------------------------------ biến và kiểu
+    _term("Biến", ["biến"],
+          "Một chiếc hộp có dán nhãn tên để cất giá trị. Gọi tên hộp là lấy được thứ bên trong."),
+    _term("Gán", ["gán", "phép gán"],
+          "Cất giá trị vào biến bằng dấu =. Đọc `a = 5` là \"cất 5 vào hộp a\", không phải \"a bằng 5\"."),
+    _term("Kiểu dữ liệu", ["kiểu dữ liệu"],
+          "Loại của giá trị: số nguyên (int), số thực (float), chữ (str), đúng/sai (bool)... Mỗi loại làm được "
+          "những việc khác nhau."),
+    _term("Số nguyên (int)", ["int", "số nguyên"],
+          "Số không có phần lẻ: 3, 0, -7. Dùng để đếm số bước, số viên ngọc..."),
+    _term("Số thực (float)", ["float", "số thực"],
+          "Số có phần thập phân, viết bằng dấu CHẤM: 2.5, 3.0 (Python không dùng dấu phẩy cho phần lẻ)."),
+    _term("bool / True / False", ["bool", "True", "False"],
+          "Kiểu chỉ có hai giá trị: True (đúng) và False (sai) - giống câu trả lời Có / Không."),
+    _term("Ép kiểu", ["ép kiểu", "type casting"],
+          "Đổi giá trị sang kiểu khác. Ví dụ int(\"42\") biến chữ \"42\" thành số 42 để tính toán."),
+    _term("f-string", ["f-string"],
+          "Chuỗi có chữ f phía trước, cho phép chèn biến vào câu: f\"Có {so} viên\" → \"Có 3 viên\"."),
+    _term("Chia lấy dư (%)", ["chia lấy dư"],
+          "Phần còn thừa sau khi chia đều. 17 % 5 = 2 vì 17 chia 5 được 3, còn thừa 2."),
+    _term("Biểu thức", ["biểu thức"],
+          "Một đoạn tính ra được giá trị, như `a + b` hay `steps * 2`."),
+    # ------------------------------------------------------------ điều kiện, vòng lặp
+    _term("Điều kiện", ["điều kiện", "điều_kiện"],
+          "Một câu hỏi có câu trả lời Đúng (True) hoặc Sai (False), ví dụ `hp > 1` (\"máu còn nhiều hơn 1 không?\")."),
+    _term("if / elif / else", ["if", "elif", "else"],
+          "if = \"nếu\", elif = \"nếu không thì nếu\", else = \"còn lại thì\". Python chọn ĐÚNG MỘT nhánh để chạy."),
+    _term("and / or / not", ["and", "or", "not"],
+          "Ghép điều kiện: and = \"và\" (cả hai đúng), or = \"hoặc\" (ít nhất một đúng), not = \"không\" (đảo ngược)."),
+    _term("Vòng lặp", ["vòng lặp"],
+          "Cách bảo máy làm đi làm lại một việc, thay vì chép cùng một lệnh nhiều lần."),
+    _term("for", ["for"],
+          "Vòng lặp đi qua LẦN LƯỢT từng phần tử của một dãy (range, list, chuỗi...). Mỗi vòng xử lý một phần tử."),
+    _term("while", ["while"],
+          "Vòng lặp chạy CHỪNG NÀO điều kiện còn đúng, như \"còn đói thì còn ăn\"."),
+    _term("range", ["range"],
+          "Tạo dãy số để đếm: range(4) là 0, 1, 2, 3 (bắt đầu từ 0, dừng TRƯỚC 4)."),
+    _term("Lặp vô hạn", ["vô hạn"],
+          "Vòng lặp không bao giờ dừng vì điều kiện luôn đúng. Game sẽ tự dừng chương trình chạy quá lâu."),
+    _term("break", ["break"], "Lệnh thoát khỏi vòng lặp NGAY LẬP TỨC, dù vòng lặp chưa chạy hết."),
+    _term("pass", ["pass"], "Lệnh \"không làm gì\". Dùng để giữ chỗ khi khối lệnh chưa viết."),
+    _term("Duyệt", ["duyệt"],
+          "Đi qua lần lượt từng phần tử, mỗi lần xử lý một phần tử - như điểm danh từng bạn trong lớp."),
+    # ------------------------------------------------------------ hàm
+    _term("Hàm", ["hàm"],
+          "Một nhóm lệnh được đặt tên để dùng lại - như một \"chiêu\" đã luyện sẵn, chỉ cần gọi tên là làm cả chuỗi "
+          "động tác."),
+    _term("def", ["def"], "Từ khoá để TẠO (định nghĩa) hàm mới. Tạo xong chưa chạy, phải gọi tên hàm kèm () mới chạy."),
+    _term("Trả về (return)", ["return", "trả về"],
+          "Hàm gửi kết quả về cho nơi đã gọi nó. Như máy bán nước: bỏ tiền vào (tham số), máy trả lon nước ra "
+          "(giá trị trả về)."),
+    _term("None", ["None"], "Giá trị đặc biệt nghĩa là \"không có gì\". Hàm không có return sẽ trả về None."),
+    _term("Hàm dựng sẵn", ["dựng sẵn", "builtin"],
+          "Hàm Python làm sẵn cho bạn, gọi được ngay: len, sum, max, min, sorted, abs, round..."),
+    _term("len", ["len"], "Đếm số phần tử của list, set, dict hoặc số ký tự của chuỗi."),
+    _term("Phương thức (method)", ["phương thức", "method"],
+          "Hàm \"gắn\" vào một giá trị, gọi bằng dấu chấm: `\"abc\".upper()`, `bag.append(3)`."),
+    # ------------------------------------------------------------ chuỗi, list, dict, set
+    _term("Chỉ số / vị trí (index)", ["chỉ số", "index"],
+          "Số thứ tự của phần tử, ĐẾM TỪ 0: phần tử đầu tiên có chỉ số 0, phần tử thứ hai có chỉ số 1..."),
+    _term("Cắt (slicing)", ["slicing", "cắt chuỗi", "cắt lát"],
+          "Lấy một đoạn liền nhau: s[1:4] lấy vị trí 1, 2, 3 (dừng TRƯỚC 4)."),
+    _term("List (danh sách)", ["list"],
+          "Dãy nhiều giá trị có thứ tự, trong ngoặc vuông: [3, 5, 8]. Thêm, bớt, sửa được - như chiếc ba lô nhiều ngăn."),
+    _term("Phần tử", ["phần tử"], "Một món bên trong list, tuple, set... [3, 5, 8] có 3 phần tử."),
+    _term("append", ["append"], "Thêm một phần tử vào CUỐI list: bag.append(9)."),
+    _term("Tuple", ["tuple"],
+          "Giống list nhưng KHÔNG sửa được, viết bằng ngoặc tròn: (2, 5). Hay dùng cho toạ độ."),
+    _term("Mở gói (unpacking)", ["mở gói"],
+          "Tách các phần của tuple / list ra nhiều biến cùng lúc: `x, y = (2, 5)` cho x = 2, y = 5."),
+    _term("Dict (từ điển)", ["dict", "từ điển"],
+          "Bảng tra cứu theo cặp khoá → giá trị, như danh bạ: tra TÊN ra SỐ điện thoại. Viết {\"An\": 10}."),
+    _term("Khoá (key)", [r"(?<!cửa )(?<!chìa )khoá(?! cửa)", "key(?==)"],
+          "Trong dict, khoá là \"tên để tra\" (như tên trong danh bạ). Trong sorted/max, key= là hàm chọn tiêu chí "
+          "để so sánh."),
+    _term("Set (tập hợp)", ["set", "tập hợp"],
+          "Túi chứa các giá trị KHÔNG TRÙNG, không có thứ tự: {1, 2, 3}. Bỏ thêm số đã có thì túi không đổi."),
+    _term("Giao / hợp / hiệu", ["giao", "hiệu tập hợp", "hiệu đối xứng"],
+          "Giao (&): có ở cả hai. Hợp (|): có ở ít nhất một. Hiệu (-): có ở bên này mà không có ở bên kia."),
+    _term("List comprehension", ["comprehension"],
+          "Cách viết gọn MỘT dòng để tạo list mới từ list cũ: [x * 2 for x in nums]."),
+    _term("Lồng nhau", ["lồng nhau"],
+          "Một thứ nằm bên trong thứ cùng loại: list trong list (như bảng có hàng và cột), vòng lặp trong vòng lặp."),
+    _term("enumerate", ["enumerate"],
+          "Vừa duyệt vừa đánh số thứ tự: mỗi vòng cho cặp (vị trí, phần tử)."),
+    # ------------------------------------------------------------ thư viện
+    _term("Thư viện / import", ["thư viện", "import", "module"],
+          "Thư viện là hộp đồ nghề người khác viết sẵn. `import` là mở hộp đó ra để dùng."),
+    _term("Luỹ thừa (**)", ["luỹ thừa"], "Nhân một số với chính nó nhiều lần: 3 ** 2 = 3 × 3 = 9."),
+    _term("Giai thừa", ["giai thừa"], "Tích các số từ 1 tới n: 4! = 1 × 2 × 3 × 4 = 24."),
+    _term("Hoán vị", ["hoán vị", "permutations"],
+          "Các cách SẮP XẾP thứ tự. Đổi chỗ là tính khác: (A, B) khác (B, A)."),
+    _term("Tổ hợp", ["tổ hợp", "combinations"],
+          "Các cách CHỌN ra vài phần tử, không quan tâm thứ tự: chọn (A, B) giống chọn (B, A)."),
+    _term("Vét cạn", ["vét cạn"], "Thử HẾT mọi khả năng để tìm đáp án - hợp khi dữ liệu nhỏ."),
+    _term("Kết quả \"lười\" / iterator", ["lười", "iterator", "iterable", "generator", "yield"],
+          "Thứ sinh ra từng phần tử khi được hỏi tới, chứ không làm sẵn cả list. Muốn xem hết thì bọc list(...)."),
+    _term("Counter", ["Counter"], "Công cụ đếm: đọc một dãy và ghi số lần xuất hiện của từng giá trị."),
+    _term("deque", ["deque"],
+          "Hàng đợi hai đầu, như hàng người mua vé: thêm / lấy ở đầu hay cuối hàng đều nhanh."),
+    _term("defaultdict", ["defaultdict"], "Dict tự tạo giá trị mặc định (0, list rỗng...) khi gặp khoá mới."),
+    _term("datetime / timedelta", ["datetime", "timedelta"],
+          "datetime xử lý ngày giờ như một cuốn lịch thông minh; timedelta là một KHOẢNG thời gian (ví dụ 10 ngày)."),
+    # ------------------------------------------------------------ lỗi
+    _term("Ngoại lệ (exception)", ["ngoại lệ", "exception", "ném"],
+          "Lỗi xảy ra khi chương trình ĐANG chạy. Không ai xử lý thì chương trình dừng lại."),
+    _term("try / except", ["try", "except", "finally"],
+          "Lưới an toàn: thử chạy khối try, nếu lỗi thì khối except xử lý thay vì để chương trình dừng."),
+    _term("raise", ["raise"], "Tự báo lỗi khi dữ liệu không hợp lệ: raise ValueError(\"...\")."),
+    _term("NameError", ["NameError"],
+          "Python gặp một cái tên nó chưa từng biết: gõ sai tên, hoặc dùng biến / hàm trước khi tạo."),
+    _term("TypeError", ["TypeError"],
+          "Dùng sai kiểu: cộng chữ với số, gọi hàm thiếu tham số, dùng len cho một con số..."),
+    _term("ValueError", ["ValueError"], "Đúng kiểu nhưng giá trị không dùng được, ví dụ int(\"abc\")."),
+    _term("IndexError", ["IndexError"], "Lấy vị trí không tồn tại, ví dụ phần tử số 5 của list chỉ có 3 phần tử."),
+    _term("KeyError", ["KeyError"], "Tra một khoá không có trong dict (hay gặp khi gõ sai chính tả khoá)."),
+    _term("ZeroDivisionError", ["ZeroDivisionError"], "Lỗi chia cho số 0 - phép chia này không có kết quả nên Python dừng lại."),
+    _term("AttributeError", ["AttributeError"],
+          "Gọi một thuộc tính / phương thức mà giá trị đó không có, ví dụ list không có popleft."),
+    _term("Gỡ lỗi (debugging)", ["gỡ lỗi", "debugging", "bug"],
+          "Tìm và sửa lỗi trong code: đọc thông báo lỗi, in giá trị ra xem, sửa từng chỗ rồi chạy lại."),
+    _term("Lỗi logic", ["lỗi logic"],
+          "Code chạy được, không báo lỗi, nhưng làm SAI việc. Python không chỉ ra được - bạn phải tự tìm."),
+    # ------------------------------------------------------------ class
+    _term("Class", ["class"],
+          "Cái KHUÔN để tạo đồ vật. Một khuôn đúc ra được nhiều đồ vật cùng kiểu (như khuôn bánh)."),
+    _term("Đối tượng (object)", ["object", "đối tượng", "đồ vật"],
+          "Một đồ vật cụ thể được tạo từ class, có dữ liệu riêng của nó."),
+    _term("Thuộc tính", ["thuộc tính"],
+          "Thông tin gắn với một đồ vật, đọc bằng dấu chấm: p.power. Trong XML, thuộc tính là thông tin ghi trong "
+          "thẻ, như x=\"3\"."),
+    _term("self", ["self"], "\"Chính tôi\" - chính đồ vật đang chạy phương thức đó."),
+    _term("__init__", ["__init__"], "Phương thức tự chạy khi tạo đồ vật mới, dùng để cất dữ liệu ban đầu."),
+    _term("Magic method (dunder)", ["magic method", "dunder"],
+          "Phương thức tên dạng __ten__ mà Python tự gọi: __str__ khi print, __len__ khi len, __add__ khi dùng +."),
+    # ------------------------------------------------------------ nâng cao
+    _term("lambda", ["lambda"], "Hàm ngắn không tên, viết tại chỗ: lambda x: x * 2 (nhận x, trả về x * 2)."),
+    _term("map / filter", ["map", "filter"],
+          "map áp một hàm lên TỪNG phần tử; filter chỉ GIỮ các phần tử mà hàm trả về True."),
+    _term("zip", ["zip"], "Ghép cặp theo vị trí: phần tử thứ nhất với thứ nhất, thứ hai với thứ hai..."),
+    _term("any / all", ["any", "all"], "any: có ÍT NHẤT MỘT cái đúng không? all: TẤT CẢ đều đúng không?"),
+    _term("Regex (biểu thức chính quy)", ["regex", "biểu thức chính quy"],
+          "Một \"khuôn\" mô tả hình dạng chữ cần tìm (ví dụ: một dãy chữ số), dùng để tìm trong văn bản."),
+    _term("XML / thẻ", ["xml"],
+          "Cách ghi dữ liệu bằng các THẺ lồng nhau như <gem x=\"3\"/>, giống HTML của trang web."),
+    _term("Closure", ["closure"],
+          "Hàm con NHỚ các biến của hàm cha đã tạo ra nó, kể cả khi hàm cha đã chạy xong."),
+    _term("Decorator", ["decorator"],
+          "Hàm \"bọc\" một hàm khác để thêm việc trước / sau mà không sửa hàm gốc. Viết @ten ngay trên def."),
+    _term("NumPy / mảng", ["numpy", "mảng"],
+          "Thư viện tính toán với BẢNG SỐ (mảng) rất nhanh - ra lệnh cho cả bảng cùng lúc thay vì từng ô."),
+    _term("Ma trận", ["ma trận"], "Bảng số có hàng và cột, như bảng điểm của cả lớp."),
+    _term("axis", ["axis"], "Hướng tính trong NumPy: axis=0 đi dọc theo cột, axis=1 đi ngang theo hàng."),
+]
+
+
+def theory_text(theory: Theory) -> str:
+    """Toàn bộ chữ của một bài lý thuyết, dùng để tìm thuật ngữ."""
+    parts = [*theory.concept, *theory.mistakes]
+    for code, note in [*theory.starter_notes, *theory.example]:
+        parts.append(code)
+        parts.append(note)
+    return "\n".join(parts)
+
+
+def find_terms(text: str, limit: int = MAX_TERMS_PER_LEVEL) -> list[GlossaryTerm]:
+    """Các thuật ngữ có trong text, theo thứ tự xuất hiện lần đầu.
+
+    Từ rất cơ bản (chương trình, lệnh...) chỉ được thêm khi bài có ít từ khó,
+    để bài nâng cao không bị lặp lại những từ học sinh đã biết.
+    """
+    found = []
+    for glossary_term in GLOSSARY:
+        position = glossary_term.first_position(text)
+        if position >= 0:
+            found.append((position, glossary_term))
+    found.sort(key=lambda pair: pair[0])
+    advanced = [glossary_term for _position, glossary_term in found if not glossary_term.basic]
+    if len(advanced) >= MIN_TERMS_BEFORE_BASIC:
+        return advanced[:limit]
+    return [glossary_term for _position, glossary_term in found[:limit]]
+
+
+# ======================================================================
+# lessons.py
+# ======================================================================
+
+@dataclass(frozen=True)
+class WorldLesson:
+    analogy: str
+    syntax: list[tuple[str, str]]
+    walkthrough: list[tuple[str, str]]
+    tips: list[str]
+
+
+WORLD_LESSONS: dict[int, WorldLesson] = {
+    1: WorldLesson(
+        analogy=(
+            "Viết chương trình giống viết giấy nhắn việc cho một người bạn rất ngoan nhưng rất \"thẳng tính\": "
+            "bạn ấy làm ĐÚNG từng chữ bạn viết, theo đúng thứ tự từ trên xuống, không tự đoán ý. "
+            "Viết sai một chữ là bạn ấy không hiểu."
+        ),
+        syntax=[
+            ("hero.move_right(3)", "hero = AI làm · dấu . = \"của\" · move_right = LÀM GÌ · (3) = LÀM BAO NHIÊU."),
+            ('hero.say("Chào")', "Chữ phải nằm trong dấu nháy để Python biết đó là câu nói, không phải tên lệnh."),
+            ("# ghi chú", "Sau dấu # là lời nhắn cho người đọc - Python bỏ qua."),
+        ],
+        walkthrough=[
+            ("hero.move_down(1)", "Bước 1: Python đọc dòng đầu tiên, hero đi xuống 1 ô."),
+            ("hero.move_right(2)", "Bước 2: dòng trên xong mới tới dòng này - hero sang phải 2 ô."),
+            ('hero.say("Tới rồi")', "Bước 3: hero nói. Hết dòng thì chương trình kết thúc."),
+        ],
+        tips=[
+            "Đọc to lệnh lên: \"hero, đi sang phải 3 ô\". Đọc thấy đúng ý thì code thường đúng.",
+            "Python phân biệt chữ hoa, chữ thường và cần đúng chính tả từng chữ cái.",
+            "Bấm Chạy thường xuyên: sai ở đâu sẽ thấy ngay ở đó.",
+        ],
+    ),
+    2: WorldLesson(
+        analogy=(
+            "Biến giống một chiếc hộp có dán nhãn tên. `coins = 5` nghĩa là bỏ số 5 vào hộp tên coins. "
+            "Muốn dùng thì gọi tên hộp. Bỏ thứ mới vào hộp thì thứ cũ bị lấy ra mất."
+        ),
+        syntax=[
+            ("ten_bien = gia_tri", "TRÁI dấu = là tên hộp, PHẢI là thứ cất vào. Python tính vế phải trước rồi mới cất."),
+            ("total = a + b", "Có thể cất kết quả của một phép tính."),
+            ("count += 1", "Viết tắt của count = count + 1: lấy số cũ cộng 1 rồi cất lại."),
+        ],
+        walkthrough=[
+            ("coins = 10", "Tạo hộp coins, cất số 10."),
+            ("price = 3", "Tạo hộp price, cất số 3."),
+            ("coins = coins - price", "Vế phải: 10 - 3 = 7. Cất 7 vào coins (số 10 cũ bị thay)."),
+            ('print("Còn", coins, "xu")', "Bảng tin hiện: Còn 7 xu."),
+        ],
+        tips=[
+            "Đặt tên biến nói rõ nó chứa gì: so_buoc dễ hiểu hơn x.",
+            "Số không có dấu nháy (5), chữ thì có (\"5\"). Hai thứ này KHÁC nhau.",
+            "Không chắc biến đang chứa gì? Dùng print(ten_bien) để xem.",
+        ],
+    ),
+    3: WorldLesson(
+        analogy=(
+            "Câu lệnh if giống khi ra đường: NẾU trời mưa THÌ mang áo mưa, NGƯỢC LẠI thì đội mũ. "
+            "Máy hỏi \"trời có mưa không?\" - đúng thì làm việc này, sai thì làm việc kia."
+        ),
+        syntax=[
+            ("if dieu_kien:", "if = \"nếu\". Cuối dòng bắt buộc có dấu hai chấm."),
+            ("    lenh_khi_dung", "Thụt vào 4 dấu cách = lệnh này nằm TRONG if, chỉ chạy khi điều kiện đúng."),
+            ("elif dieu_kien_khac:", "\"Nếu không thì nếu...\": chỉ xét khi các điều kiện phía trên đều sai."),
+            ("else:", "\"Còn lại\": chạy khi mọi điều kiện phía trên đều sai."),
+        ],
+        walkthrough=[
+            ("hp = 2", "Hero còn 2 máu."),
+            ("if hp >= 3:", "Hỏi: 2 >= 3? SAI → bỏ qua khối bên dưới."),
+            ('    hero.say("Khoẻ re")', "Không chạy."),
+            ("elif hp == 2:", "Hỏi tiếp: 2 == 2? ĐÚNG → chạy khối này."),
+            ('    hero.say("Hơi mệt")', "Hero nói \"Hơi mệt\"."),
+            ("else:", "Đã có nhánh đúng rồi nên bỏ qua else."),
+            ('    hero.say("Nguy hiểm")', "Không chạy."),
+        ],
+        tips=[
+            "Một dấu = là CẤT vào; hai dấu == là HỎI \"có bằng không?\".",
+            "Trong chuỗi if / elif / else, Python chỉ chạy MỘT nhánh: nhánh đúng đầu tiên.",
+            "Dòng không thụt vào thì không thuộc if - nó luôn chạy.",
+        ],
+    ),
+    4: WorldLesson(
+        analogy=(
+            "Vòng lặp giống khi cô giáo bảo \"chép 5 lần\": thay vì viết 5 dòng giống nhau, bạn viết 1 dòng và "
+            "nói \"làm 5 lần\". `for` dùng khi biết trước số lần; `while` dùng khi \"làm tới khi xong thì thôi\", "
+            "như ăn cho tới khi no."
+        ),
+        syntax=[
+            ("for i in range(4):", "Lặp 4 lần; i lần lượt là 0, 1, 2, 3."),
+            ("for i in range(1, 4):", "i lần lượt là 1, 2, 3 (không có 4)."),
+            ("while dieu_kien:", "Hỏi điều kiện: đúng thì chạy khối lệnh rồi quay lại hỏi tiếp; sai thì thoát."),
+            ("break", "Thoát khỏi vòng lặp ngay lập tức."),
+        ],
+        walkthrough=[
+            ("for i in range(3):", "Vòng 1: i = 0. Vòng 2: i = 1. Vòng 3: i = 2. Rồi hết."),
+            ("    hero.move_down()", "Mỗi vòng hero đi xuống 1 ô → tổng cộng 3 ô."),
+            ("    print(i)", "Bảng tin hiện 0, rồi 1, rồi 2."),
+            ('hero.say("Xong")', "Không thụt lề nên chạy MỘT lần, sau khi vòng lặp kết thúc."),
+        ],
+        tips=[
+            "Tìm phần \"lặp lại\" trong đường đi rồi viết nó MỘT lần trong thân vòng lặp.",
+            "range(n) bắt đầu từ 0 và dừng TRƯỚC n.",
+            "Với while, mỗi vòng phải có gì đó thay đổi, nếu không vòng lặp chạy mãi.",
+        ],
+    ),
+    5: WorldLesson(
+        analogy=(
+            "Ép kiểu giống đổi tiền: tờ giấy ghi \"42\" (chuỗi) chỉ là chữ, chưa tính được. `int(...)` đổi nó "
+            "thành con số 42 thật để cộng trừ. Ngược lại, `str(...)` biến con số thành chữ để ghép vào câu."
+        ),
+        syntax=[
+            ('int("42")', "Chuỗi → số nguyên 42. Chuỗi chỉ được chứa chữ số."),
+            ('float("2.5")', "Chuỗi → số thực 2.5."),
+            ("str(42)", "Số → chuỗi \"42\", để nối với chữ khác."),
+            ("bool(0)", "→ False. Số 0, chuỗi rỗng, list rỗng là False; còn lại là True."),
+        ],
+        walkthrough=[
+            ('a = "12"', "a là CHUỖI \"12\" (có dấu nháy)."),
+            ('b = "30"', "b là chuỗi \"30\"."),
+            ("print(a + b)", "Chuỗi + chuỗi = NỐI lại: in ra 1230."),
+            ("print(int(a) + int(b))", "Đổi sang số trước rồi cộng: in ra 42."),
+            ('print("Tổng: " + str(42))', "Số đổi thành chuỗi để nối: in ra Tổng: 42."),
+        ],
+        tips=[
+            "Thấy dấu nháy là chuỗi, dù bên trong toàn chữ số.",
+            "int(\"7.5\") báo lỗi - đi đường vòng: int(float(\"7.5\")).",
+            "Trước khi tính, in giá trị ra để chắc nó là số chứ không phải chữ.",
+        ],
+    ),
+    6: WorldLesson(
+        analogy=(
+            "Hàm giống một \"chiêu thức\" bạn tự đặt tên: luyện chiêu một lần (def), sau đó chỉ cần gọi tên chiêu là "
+            "hero làm cả chuỗi động tác. Hàm có tham số giống chiêu chỉnh được: \"nhảy 2 ô\", \"nhảy 3 ô\". "
+            "Hàm có return giống máy bán nước: đưa vào thứ gì, máy trả ra kết quả."
+        ),
+        syntax=[
+            ("def ten_ham(tham_so):", "def = \"định nghĩa\": tạo chiêu mới tên ten_ham, nhận vào tham_so. Có dấu :"),
+            ("    return ket_qua", "Gửi kết quả về chỗ gọi và kết thúc hàm."),
+            ("x = ten_ham(5)", "GỌI hàm với tham_so = 5, cất kết quả vào x."),
+            ("len(ds), max(ds), sum(ds)", "Hàm có sẵn của Python - gọi ngay, không cần def."),
+        ],
+        walkthrough=[
+            ("def double(n):", "Python ghi nhớ hàm double, CHƯA chạy gì cả."),
+            ("    return n * 2", "(Chỉ chạy khi hàm được gọi.)"),
+            ("x = double(4)", "Gọi hàm: n = 4 → tính 4 * 2 = 8 → trả về 8 → x = 8."),
+            ("y = double(x) + 1", "Gọi tiếp với n = 8 → được 16, cộng 1 → y = 17."),
+            ("print(x, y)", "Bảng tin hiện: 8 17."),
+        ],
+        tips=[
+            "def chỉ là \"dạy chiêu\"; muốn chạy phải GỌI kèm dấu ngoặc ().",
+            "print chỉ hiện ra màn hình; return mới gửi kết quả cho code dùng tiếp.",
+            "Thấy một đoạn code lặp lại 2-3 lần? Gói nó vào một hàm.",
+        ],
+    ),
+    7: WorldLesson(
+        analogy=(
+            "Chuỗi giống một hàng ghế có đánh số, mỗi ghế có một ký tự ngồi. Số ghế bắt đầu từ 0. "
+            "Cắt chuỗi giống nói \"mời các bạn từ ghế 1 tới TRƯỚC ghế 4 đứng dậy\"."
+        ),
+        syntax=[
+            ("s[0]", "Ký tự ở ghế số 0 (ký tự đầu tiên)."),
+            ("s[-1]", "Ký tự cuối cùng (số âm là đếm ngược từ cuối)."),
+            ("s[1:4]", "Từ vị trí 1 tới TRƯỚC vị trí 4: lấy vị trí 1, 2, 3."),
+            ('f"Xin chào {ten}"', "f-string: chèn giá trị của biến vào trong câu."),
+            ('s.upper(), s.split(","), s.replace("a", "b")', "Viết hoa; cắt thành list theo dấu phẩy; thay chữ a bằng b."),
+        ],
+        walkthrough=[
+            ('word = "PYTHON"', "P ở vị trí 0, Y ở 1, T ở 2, H ở 3, O ở 4, N ở 5."),
+            ("print(word[0])", "In P."),
+            ("print(word[2:5])", "Vị trí 2, 3, 4 → in THO."),
+            ("print(word[::-1])", "Bước -1 = đọc ngược → in NOHTYP."),
+            ('print(f"Có {len(word)} chữ")', "len đếm được 6 ký tự → in Có 6 chữ."),
+        ],
+        tips=[
+            "Luôn đếm từ 0. Viết số vị trí dưới từng chữ ra giấy nháp cho chắc.",
+            "Cắt chuỗi ra vẫn là chuỗi - cần int(...) nếu muốn tính toán.",
+            "Phương thức chuỗi không sửa chuỗi gốc mà tạo chuỗi mới: nhớ cất lại vào biến.",
+        ],
+    ),
+    8: WorldLesson(
+        analogy=(
+            "List giống chiếc ba lô có nhiều ngăn đánh số 0, 1, 2...: thêm đồ, lấy đồ, đổi đồ đều được. "
+            "Tuple giống hộp quà đã dán kín: xem được bên trong nhưng không thay được. Toạ độ (x, y) thường cất "
+            "trong tuple."
+        ),
+        syntax=[
+            ("bag = [3, 5, 8]", "List 3 phần tử: trong ngoặc vuông, cách nhau bằng dấu phẩy."),
+            ("bag[0]", "Phần tử ở ngăn số 0 → 3."),
+            ("bag.append(9)", "Thêm 9 vào CUỐI list."),
+            ("for item in bag:", "Lấy lần lượt từng món trong ba lô."),
+            ("x, y = (2, 5)", "Mở gói tuple: x = 2, y = 5."),
+        ],
+        walkthrough=[
+            ("scores = [7, 9]", "List có 2 phần tử."),
+            ("scores.append(10)", "Giờ list là [7, 9, 10]."),
+            ("total = 0", "Hộp cộng dồn, bắt đầu từ 0."),
+            ("for s in scores:", "s lần lượt là 7, rồi 9, rồi 10."),
+            ("    total += s", "total đổi dần: 0 → 7 → 16 → 26."),
+            ("print(total, len(scores))", "In 26 3."),
+        ],
+        tips=[
+            "Phần tử cuối có chỉ số len(list) - 1, hoặc dùng [-1] cho nhanh.",
+            "append sửa list tại chỗ - đừng viết a = a.append(x).",
+            "Mỗi viên ngọc là một dict như {\"x\": 2, \"y\": 1}: đọc bằng gem[\"x\"].",
+        ],
+    ),
+    9: WorldLesson(
+        analogy=(
+            "Dict giống cuốn danh bạ điện thoại: tra theo TÊN (khoá) để ra SỐ (giá trị), không cần nhớ nó nằm "
+            "trang mấy. Set giống túi sticker không trùng: bỏ vào sticker đã có thì túi không thay đổi."
+        ),
+        syntax=[
+            ('prices = {"táo": 5, "cam": 7}', "Mỗi cặp khoá: giá trị, cách nhau bằng dấu phẩy, trong ngoặc nhọn."),
+            ('prices["táo"]', "Tra giá trị của khoá \"táo\" → 5."),
+            ('prices["lê"] = 4', "Thêm cặp mới (hoặc sửa nếu khoá đã có)."),
+            ('prices.get("nho", 0)', "Tra an toàn: không có khoá thì trả về 0 thay vì báo lỗi."),
+            ("seen = set()", "Tạo set rỗng; dùng seen.add(x) để thêm."),
+        ],
+        walkthrough=[
+            ('fruits = ["táo", "cam", "táo"]', "List có \"táo\" 2 lần."),
+            ("count = {}", "Dict rỗng làm sổ đếm."),
+            ("for fruit in fruits:", "Lần lượt: táo, cam, táo."),
+            ("    count[fruit] = count.get(fruit, 0) + 1", "táo: 0 + 1 = 1 → cam: 0 + 1 = 1 → táo: 1 + 1 = 2."),
+            ("print(count)", "In {'táo': 2, 'cam': 1}."),
+            ("print(len(set(fruits)))", "set bỏ phần trùng còn táo, cam → in 2."),
+        ],
+        tips=[
+            "Khoá phải gõ y hệt, kể cả chữ hoa, chữ thường và dấu.",
+            "{} là dict rỗng; set rỗng phải viết set().",
+            "Lấy cả khoá lẫn giá trị: for khoa, gia_tri in d.items():",
+        ],
+    ),
+    10: WorldLesson(
+        analogy=(
+            "List comprehension giống ra lệnh cho cả hàng: \"mỗi bạn trong hàng, ai cao hơn 1m5 thì bước lên\" - "
+            "một câu thay cho cả đoạn dài. List lồng nhau giống bảng ô vuông trong vở: grid[hàng][cột]."
+        ),
+        syntax=[
+            ("[x * 2 for x in nums]", "Với MỖI x trong nums, lấy x * 2 → được list mới."),
+            ("[x for x in nums if x > 0]", "Chỉ giữ những x thoả điều kiện x > 0."),
+            ("grid[y][x]", "Vào hàng y trước, rồi tới cột x trong hàng đó."),
+            ("for y, row in enumerate(grid):", "Vừa lấy số hàng y, vừa lấy cả hàng row."),
+        ],
+        walkthrough=[
+            ("nums = [3, -1, 4]", "List gốc."),
+            ("big = [n * 10 for n in nums if n > 0]", "3 giữ → 30; -1 bỏ; 4 giữ → 40. big = [30, 40]."),
+            ("table = [[1, 2], [3, 4]]", "Bảng 2 hàng, 2 cột."),
+            ("print(table[1][0])", "Hàng 1 là [3, 4], lấy cột 0 → in 3."),
+            ("flat = [v for row in table for v in row]", "Đi từng hàng, rồi từng số trong hàng: [1, 2, 3, 4]."),
+        ],
+        tips=[
+            "Đọc comprehension bắt đầu từ chữ for: \"với mỗi n trong nums, nếu..., thì lấy...\".",
+            "Bản đồ: y là hàng (trên → dưới), x là cột (trái → phải): grid[y][x] nhưng move_to(x, y).",
+            "Comprehension khó đọc quá? Viết bằng for thường trước, rút gọn sau.",
+        ],
+    ),
+    11: WorldLesson(
+        analogy=(
+            "Hai nhóm bạn: nhóm thích bóng đá và nhóm thích cờ vua. GIAO là các bạn thích CẢ HAI; HỢP là tất cả "
+            "các bạn của hai nhóm (không đếm trùng); HIỆU là các bạn chỉ thích bóng đá mà không thích cờ vua - "
+            "đúng như tập hợp trong môn Toán."
+        ),
+        syntax=[
+            ("a & b", "Giao: có ở cả a và b."),
+            ("a | b", "Hợp: có ở ít nhất một trong hai."),
+            ("a - b", "Hiệu: có ở a nhưng không có ở b."),
+            ("a ^ b", "Chỉ có ở MỘT bên (bỏ phần chung)."),
+            ("x in a", "Hỏi: x có trong a không? → True / False."),
+        ],
+        walkthrough=[
+            ('football = {"An", "Bình", "Chi"}', "Nhóm bóng đá."),
+            ('chess = {"Bình", "Dũng"}', "Nhóm cờ vua."),
+            ("print(football & chess)", "Phần chung → {'Bình'}."),
+            ("print(football - chess)", "Chỉ bóng đá → {'An', 'Chi'} (thứ tự có thể khác)."),
+            ('print("Dũng" in football)', "Dũng không có trong nhóm bóng đá → False."),
+        ],
+        tips=[
+            "Phép giao, hợp, hiệu chỉ dùng cho set: list phải đổi bằng set(...) trước.",
+            "a - b khác b - a: hãy hỏi \"có ở đâu mà không có ở đâu?\".",
+            "Set không có thứ tự nên không lấy phần tử theo chỉ số được.",
+        ],
+    ),
+    12: WorldLesson(
+        analogy=(
+            "`import math` giống mở hộp dụng cụ học Toán: trong đó có sẵn căn bậc hai, số π, máy làm tròn... "
+            "Bạn không cần tự chế tạo, chỉ cần lấy ra dùng bằng math.ten_dung_cu."
+        ),
+        syntax=[
+            ("import math", "Mở hộp dụng cụ - đặt ở đầu chương trình."),
+            ("math.sqrt(16)", "Căn bậc hai → 4.0."),
+            ("math.ceil(2.1), math.floor(2.9)", "Làm tròn LÊN → 3; làm tròn XUỐNG → 2."),
+            ("3 ** 2", "Luỹ thừa: 3 mũ 2 = 9 (không dùng dấu ^)."),
+            ("math.gcd(12, 18)", "Ước chung lớn nhất → 6."),
+        ],
+        walkthrough=[
+            ("import math", "Có hộp dụng cụ math."),
+            ("students = 45", "45 học sinh."),
+            ("seats = 20", "Mỗi xe 20 chỗ."),
+            ("print(students / seats)", "In 2.25 - không thuê được 0.25 chiếc xe!"),
+            ("print(math.ceil(students / seats))", "Làm tròn lên → cần 3 xe."),
+            ("print(round(math.pi, 2))", "π giữ 2 chữ số sau dấu chấm → 3.14."),
+        ],
+        tips=[
+            "Quên import math thì Python báo NameError ngay.",
+            "Bài \"cần bao nhiêu xe / hộp\" → làm tròn LÊN (ceil).",
+            "sqrt cho số thực; cần số nguyên thì bọc int(...).",
+        ],
+    ),
+    13: WorldLesson(
+        analogy=(
+            "3 bạn xếp hàng chụp ảnh có bao nhiêu cách xếp? Đó là HOÁN VỊ (đổi chỗ là khác). Chọn 2 bạn trực "
+            "nhật trong 3 bạn có bao nhiêu cách? Đó là TỔ HỢP (An-Bình cũng như Bình-An). itertools là \"máy liệt "
+            "kê\" giúp bạn không bỏ sót cách nào."
+        ),
+        syntax=[
+            ("from itertools import permutations, combinations, product", "Lấy 3 công cụ liệt kê ra dùng."),
+            ("permutations(ds)", "Mọi cách SẮP XẾP thứ tự."),
+            ("combinations(ds, 2)", "Mọi cách CHỌN 2 phần tử, không tính thứ tự."),
+            ("product(a, b)", "Ghép MỌI phần tử của a với MỌI phần tử của b."),
+        ],
+        walkthrough=[
+            ("from itertools import permutations, combinations", "Lấy công cụ."),
+            ('kids = ["An", "Bình", "Chi"]', "3 bạn."),
+            ("print(len(list(permutations(kids))))", "Số cách xếp hàng: 3 × 2 × 1 → in 6."),
+            ("for first, second in combinations(kids, 2):", "Lần lượt: (An, Bình), (An, Chi), (Bình, Chi)."),
+            ("    print(first, second)", "In 3 cặp - không có cặp đảo ngược."),
+        ],
+        tips=[
+            "Hỏi \"đổi chỗ có tính là khác không?\" - có: permutations; không: combinations.",
+            "Kết quả là \"lười\": bọc list(...) nếu muốn đếm bằng len hoặc in ra.",
+            "Tìm được đáp án rồi thì break để khỏi thử tiếp.",
+        ],
+    ),
+    14: WorldLesson(
+        analogy=(
+            "Counter giống lớp trưởng kiểm phiếu: đọc từng phiếu và ghi vạch đếm cho từng tên. deque giống hàng "
+            "người mua vé: người mới vào cuối hàng, người đầu hàng được phục vụ trước. defaultdict giống tủ đồ tự "
+            "mọc thêm ngăn mới khi có bạn mới tới."
+        ),
+        syntax=[
+            ("from collections import Counter, deque, defaultdict", "Lấy 3 công cụ."),
+            ("Counter(ds).most_common(2)", "2 giá trị xuất hiện nhiều nhất: [(giá trị, số lần), ...]."),
+            ("queue.popleft()", "Với deque: lấy người ở ĐẦU hàng ra."),
+            ("groups = defaultdict(list)", "Khoá mới tự có sẵn một list rỗng."),
+        ],
+        walkthrough=[
+            ("from collections import Counter, deque", "Lấy công cụ."),
+            ('votes = ["Lan", "Minh", "Lan"]', "3 phiếu bầu."),
+            ("tally = Counter(votes)", "tally giống dict: {'Lan': 2, 'Minh': 1}."),
+            ("print(tally.most_common(1)[0][0])", "most_common(1) là [('Lan', 2)] → [0] là ('Lan', 2) → [0] nữa là Lan."),
+            ('line = deque(["A", "B"])', "Hàng có A rồi tới B."),
+            ('line.append("C")', "C vào cuối hàng."),
+            ("print(line.popleft())", "A ở đầu hàng ra trước → in A."),
+        ],
+        tips=[
+            "most_common trả về LIST các cặp - nhớ [0] để lấy cặp đầu tiên.",
+            "Cần lấy ra ở đầu hàng nhiều lần → dùng deque thay cho list.",
+            "deque(ds, maxlen=3) chỉ giữ 3 phần tử mới nhất.",
+        ],
+    ),
+    15: WorldLesson(
+        analogy=(
+            "datetime giống một cuốn lịch thông minh: biết tháng nào 30 hay 31 ngày, năm nào nhuận. Bạn chỉ cần "
+            "hỏi \"còn bao nhiêu ngày tới sinh nhật?\" hay \"45 ngày nữa là ngày nào?\" - lịch tự tính hộ."
+        ),
+        syntax=[
+            ("from datetime import date, timedelta", "Lấy công cụ ngày và khoảng thời gian."),
+            ("date(2026, 9, 5)", "Ngày 5/9/2026 - thứ tự là năm, tháng, ngày."),
+            ('date.fromisoformat("2026-09-05")', "Đổi chuỗi năm-tháng-ngày thành ngày."),
+            ("(later - earlier).days", "Số ngày giữa hai ngày."),
+            ('day.strftime("%d/%m/%Y")', "Viết ngày kiểu Việt Nam: 05/09/2026."),
+        ],
+        walkthrough=[
+            ("from datetime import date, timedelta", "Lấy công cụ."),
+            ("start = date(2026, 1, 25)", "Ngày 25/1/2026."),
+            ("later = start + timedelta(days=10)", "10 ngày sau: lịch tự sang tháng 2 → 4/2/2026."),
+            ("print((later - start).days)", "Khoảng cách → in 10."),
+            ("print(start.weekday())", "25/1/2026 là Chủ nhật → in 6 (0 là thứ Hai, 6 là Chủ nhật)."),
+        ],
+        tips=[
+            "date(năm, tháng, ngày) - năm đứng trước.",
+            "Muốn cộng ngày phải dùng timedelta, không cộng số thẳng vào ngày.",
+            "Quên .days thì in ra cả dòng dài như \"10 days, 0:00:00\".",
+        ],
+    ),
+    16: WorldLesson(
+        analogy=(
+            "try / except giống tấm đệm khi tập nhảy cao: cứ thử nhảy (try), nếu ngã (lỗi) thì đệm đỡ (except) "
+            "và bạn đứng dậy nhảy tiếp, thay vì nghỉ cả buổi. Không có đệm, gặp lỗi là chương trình dừng hẳn."
+        ),
+        syntax=[
+            ("try:", "Thử chạy khối lệnh bên dưới."),
+            ("except ValueError:", "Nếu xảy ra lỗi ValueError thì chạy khối này thay vì dừng chương trình."),
+            ("else:", "Chạy khi KHÔNG có lỗi nào."),
+            ("finally:", "Luôn chạy, dù có lỗi hay không."),
+            ('raise ValueError("Sai rồi")', "Tự báo lỗi khi dữ liệu không hợp lệ."),
+        ],
+        walkthrough=[
+            ('texts = ["5", "abc", "7"]', "Có một phần tử không phải số."),
+            ("total = 0", "Cộng dồn từ 0."),
+            ("for text in texts:", "Lần lượt \"5\", \"abc\", \"7\"."),
+            ("    try:", "Thử đổi sang số..."),
+            ("        total += int(text)", "\"5\" → 5: được. \"abc\" → lỗi ValueError!"),
+            ("    except ValueError:", "Đệm đỡ: bắt đúng lỗi ValueError."),
+            ('        print("Bỏ qua", text)', "In \"Bỏ qua abc\" rồi chạy tiếp vòng sau."),
+            ("print(total)", "5 + 7 → in 12."),
+        ],
+        tips=[
+            "Bắt đúng tên lỗi (ValueError, KeyError...) để các lỗi khác vẫn hiện ra cho bạn sửa.",
+            "Đặt try bên TRONG vòng lặp nếu muốn một lần lỗi không làm hỏng cả vòng lặp.",
+            "Tên lỗi ở Bảng tin cho biết nên viết except loại nào.",
+        ],
+    ),
+    17: WorldLesson(
+        analogy=(
+            "Class giống KHUÔN làm bánh: khuôn hình con cá (class) đúc ra được nhiều chiếc bánh cá (đồ vật). "
+            "Mỗi chiếc có nhân riêng (thuộc tính) nhưng cùng hình dạng và cùng cách dùng (phương thức). "
+            "`self` nghĩa là \"chính chiếc bánh này\"."
+        ),
+        syntax=[
+            ("class Pet:", "Tạo khuôn tên Pet (tên class viết hoa chữ cái đầu)."),
+            ("    def __init__(self, name):", "Tự chạy khi đúc đồ vật mới; self là đồ vật đó."),
+            ("        self.name = name", "Cất dữ liệu vào đồ vật: thuộc tính name."),
+            ("    def greet(self):", "Phương thức: việc mà đồ vật làm được."),
+            ('cat = Pet("Mướp")', "Đúc một đồ vật mới từ khuôn Pet."),
+        ],
+        walkthrough=[
+            ("class Pet:", "Khuôn Pet."),
+            ("    def __init__(self, name):", "Khi đúc, nhận vào name."),
+            ("        self.name = name", "Ghi tên lên đồ vật."),
+            ("        self.meals = 0", "Mỗi con bắt đầu với 0 bữa."),
+            ("    def eat(self):", "Phương thức ăn."),
+            ("        self.meals += 1", "Chỉ con đang ăn mới tăng số bữa."),
+            ('cat = Pet("Mướp")', "Tạo cat: name = Mướp, meals = 0."),
+            ("cat.eat()", "Python tự đưa cat vào self → cat.meals = 1."),
+            ("print(cat.name, cat.meals)", "In: Mướp 1."),
+        ],
+        tips=[
+            "Mọi phương thức đều có self ở tham số đầu tiên.",
+            "__init__ có HAI dấu gạch dưới ở mỗi bên.",
+            "Magic method như __str__, __len__, __add__ quyết định print(), len(), dấu + làm gì với đồ vật của bạn.",
+        ],
+    ),
+    18: WorldLesson(
+        analogy=(
+            "Màn trùm giống bài kiểm tra cuối kỳ: không có kiến thức mới, nhưng phải ghép nhiều kỹ năng đã học. "
+            "Như nấu một bữa cơm: nấu cơm, rán trứng, luộc rau - làm xong món nào nếm thử món đó, rồi mới dọn mâm."
+        ),
+        syntax=[
+            ("# Phần 1: ...", "Chia code thành từng phần, ghi chú tên mỗi phần."),
+            ("weapons = {...}", "Dict để tra cứu (World 9)."),
+            ("for ... in ...:", "Vòng lặp cho việc lặp lại (World 4)."),
+            ("try: ... except ...:", "Tấm đệm cho việc có thể lỗi (World 16)."),
+        ],
+        walkthrough=[
+            ("# Phần 1: chuẩn bị dữ liệu", "Viết, bấm Chạy, xem Bảng tin."),
+            ('plan = {"right": 2, "down": 1}', "Dữ liệu tra cứu."),
+            ("# Phần 2: hành động", "Chỉ viết tiếp khi phần 1 đã đúng."),
+            ("for direction, steps in plan.items():", "Lặp qua từng cặp (hướng, số bước)."),
+            ("    print(direction, steps)", "In ra để chắc dữ liệu đúng trước khi cho hero đi."),
+        ],
+        tips=[
+            "Đọc kỹ đề, liệt kê các việc theo thứ tự trước khi gõ code.",
+            "Xong mỗi phần thì bấm Chạy để kiểm tra - đừng đợi viết hết.",
+            "Kẹt ở phần nào thì mở lại lý thuyết của World đó.",
+        ],
+    ),
+    19: WorldLesson(
+        analogy=(
+            "Tưởng tượng băng chuyền trong nhà máy: map là máy đóng dấu lên TỪNG hộp đi qua; filter là cổng chỉ "
+            "cho hộp đạt chuẩn đi tiếp; zip ghép từng hộp của băng chuyền A với hộp cùng vị trí của băng chuyền B. "
+            "lambda là cái máy nhỏ lắp nhanh tại chỗ, không cần đặt tên."
+        ),
+        syntax=[
+            ("lambda x: x * 2", "Hàm không tên: nhận x, trả về x * 2."),
+            ("list(map(f, ds))", "Áp f lên từng phần tử."),
+            ("list(filter(f, ds))", "Giữ phần tử mà f trả về True."),
+            ("zip(a, b)", "Ghép cặp theo vị trí."),
+            ("sorted(ds, key=lambda p: p[1])", "Sắp xếp theo phần tử thứ hai của mỗi cặp."),
+        ],
+        walkthrough=[
+            ("nums = [4, 7, 10]", "List gốc."),
+            ("print(list(map(lambda n: n + 1, nums)))", "Mỗi số cộng 1 → [5, 8, 11]."),
+            ("print(list(filter(lambda n: n % 2 == 0, nums)))", "Chỉ giữ số chẵn → [4, 10]."),
+            ('names = ["An", "Bo"]', "Hai tên."),
+            ("for name, number in zip(names, nums):", "Cặp (An, 4), (Bo, 7); số 10 không có cặp nên bị bỏ."),
+            ("    print(name, number)", "In 2 dòng."),
+        ],
+        tips=[
+            "map / filter cho kết quả \"lười\": bọc list(...) để xem.",
+            "lambda chỉ viết được MỘT biểu thức và không cần chữ return.",
+            "key=... nhận một HÀM (thường là lambda), không phải một giá trị.",
+        ],
+    ),
+    20: WorldLesson(
+        analogy=(
+            "Regex giống tấm khuôn soi chữ: bạn mô tả hình dạng chữ cần tìm (ví dụ \"một dãy chữ số\"), rồi đặt "
+            "khuôn lên văn bản để tìm mọi chỗ vừa khuôn. XML giống những hộp quà lồng nhau có dán nhãn: mỗi thẻ là "
+            "một hộp, có tên và ghi thông tin bên ngoài (thuộc tính)."
+        ),
+        syntax=[
+            ("import re", "Mở thư viện regex."),
+            (r're.findall(r"\d+", text)', "Tìm MỌI dãy chữ số → list các chuỗi."),
+            (r're.search(r"x(\d+)", text).group(1)', "Tìm chỗ khớp đầu tiên, lấy phần nằm trong ngoặc ( )."),
+            ("ET.fromstring(xml_text)", "Đọc XML thành cây thẻ."),
+            ('tag.get("x")', "Đọc thuộc tính x của thẻ (luôn là chuỗi)."),
+        ],
+        walkthrough=[
+            ("import re", "Lấy thư viện regex."),
+            ('text = "Kho 1 có 12 ngọc, kho 2 có 30 ngọc"', "Văn bản cần đọc."),
+            (r'nums = re.findall(r"\d+", text)', r'\d+ là một hay nhiều chữ số liền nhau → ["1", "12", "2", "30"].'),
+            ("print(sum(int(n) for n in nums))", "Đổi từng chuỗi sang số rồi cộng → in 45."),
+            (r'match = re.search(r"có (\d+)", text)', "Chỗ khớp đầu tiên là \"có 12\"."),
+            ("print(match.group(1))", "Phần trong ngoặc → in 12."),
+        ],
+        tips=[
+            r'Viết mẫu với chữ r phía trước: r"\d+".',
+            "Kết quả regex và thuộc tính XML đều là CHUỖI - cần int(...) trước khi tính.",
+            "re.search không tìm thấy thì trả về None - kiểm tra trước khi gọi .group.",
+        ],
+    ),
+    21: WorldLesson(
+        analogy=(
+            "Closure giống chiếc máy được cài sẵn công thức: máy \"cộng 5\" sau khi tạo ra sẽ nhớ mãi số 5, dù người "
+            "cài đặt đã đi về. Decorator giống giấy gói quà: món quà (hàm gốc) giữ nguyên, nhưng lớp giấy làm "
+            "thêm việc trước hoặc sau khi mở (in lời chào, làm lại 2 lần...)."
+        ),
+        syntax=[
+            ("def make_adder(k):", "Hàm NGOÀI nhận k..."),
+            ("    def add(x):", "...tạo hàm TRONG có dùng k..."),
+            ("        return x + k", "...hàm trong nhớ k."),
+            ("    return add", "Trả về chính hàm trong (KHÔNG có ngoặc)."),
+            ("@decorator", "Đặt ngay trên def: nghĩa là f = decorator(f)."),
+        ],
+        walkthrough=[
+            ("def make_adder(k):", "Nhà máy tạo hàm cộng."),
+            ("    def add(x):", "Hàm con."),
+            ("        return x + k", "Dùng k của hàm ngoài."),
+            ("    return add", "Gửi hàm con ra ngoài."),
+            ("plus5 = make_adder(5)", "plus5 là hàm add đã nhớ k = 5."),
+            ("print(plus5(10))", "10 + 5 → in 15."),
+            ("def loud(func):", "Decorator: nhận một hàm..."),
+            ("    def wrapper():", "...tạo hàm bọc..."),
+            ('        print("Bắt đầu")', "...làm thêm việc TRƯỚC..."),
+            ("        func()", "...rồi gọi hàm gốc."),
+            ("    return wrapper", "Trả hàm bọc ra."),
+            ("@loud", "Bọc hàm hello ngay bên dưới."),
+            ("def hello():", "Hàm gốc."),
+            ('    print("Xin chào")', "Gọi hello() sẽ in \"Bắt đầu\" rồi \"Xin chào\"."),
+        ],
+        tips=[
+            "return ten_ham (không ngoặc) = trả về hàm; return ten_ham() = gọi hàm rồi trả về kết quả.",
+            "Decorator phải trả về hàm bọc, nếu không hàm sau khi bọc sẽ thành None.",
+            "Decorator có tham số như @repeat(3) cần thêm một tầng hàm nữa.",
+        ],
+    ),
+    22: WorldLesson(
+        analogy=(
+            "NumPy giống bảng tính Excel siêu tốc cho Python: thay vì cộng từng ô bằng vòng lặp, bạn ra lệnh cho "
+            "CẢ BẢNG cùng lúc: \"cộng mọi ô thêm 1\", \"tìm số lớn nhất\", \"cộng theo từng cột\"."
+        ),
+        syntax=[
+            ("import numpy as np", "Mở NumPy, gọi tắt là np."),
+            ("table = np.array([[1, 2], [3, 4]])", "Mảng 2 hàng, 2 cột."),
+            ("table.sum(), table.max(), table.mean()", "Tổng, số lớn nhất, trung bình của cả mảng."),
+            ("table.sum(axis=0)", "Cộng dọc xuống theo CỘT → mỗi cột ra một số."),
+            ("table[table > 2]", "Lọc: chỉ giữ các số lớn hơn 2."),
+        ],
+        walkthrough=[
+            ("import numpy as np", "Lấy NumPy."),
+            ("marks = np.array([[8, 6], [9, 7]])", "Mỗi hàng là một học sinh, mỗi cột là một môn."),
+            ("print(marks.shape)", "In (2, 2): 2 hàng, 2 cột."),
+            ("print(marks.sum(axis=1))", "Tổng theo hàng (mỗi học sinh) → [14 16]."),
+            ("print(marks.mean(axis=0))", "Trung bình mỗi môn → [8.5 6.5]."),
+            ("print((marks >= 8).sum())", "Đếm điểm từ 8 trở lên: 8 và 9 → in 2."),
+        ],
+        tips=[
+            "axis=0 = đi dọc xuống (theo cột); axis=1 = đi ngang (theo hàng).",
+            "A * B nhân từng ô với nhau; nhân ma trận phải dùng A @ B.",
+            "Kết quả là số kiểu NumPy: bọc int(...) khi cần nhập mật mã.",
+        ],
+    ),
+    23: WorldLesson(
+        analogy=(
+            "Gỡ lỗi giống làm thám tử: đọc dấu vết (thông báo lỗi), khoanh vùng hiện trường (dòng bị tô đỏ), hỏi "
+            "nhân chứng (in giá trị biến ra), rồi mới kết luận thủ phạm. Thám tử giỏi không đoán mò."
+        ),
+        syntax=[
+            ("SyntaxError", "Viết sai \"ngữ pháp\": thiếu dấu :, thiếu ngoặc, thiếu dấu nháy."),
+            ("NameError", "Dùng một cái tên Python chưa biết: gõ sai hoặc chưa tạo."),
+            ("TypeError", "Trộn sai kiểu: chuỗi + số, gọi hàm thiếu tham số."),
+            ("print(bien)", "Vũ khí số 1: xem giá trị thật đang có."),
+        ],
+        walkthrough=[
+            ("count = 0", "Biến đếm."),
+            ("for i in range(3):", "Lặp 3 lần."),
+            ("    count += 1", "Thụt vào nên thuộc vòng lặp → tăng 3 lần."),
+            ('    print("vòng", i, "count =", count)', "In từng bước để xem count thay đổi thế nào."),
+            ("print(count)", "Ra 3. Nếu ra 1 thì có thể dòng count += 1 bị thụt lề sai."),
+        ],
+        tips=[
+            "Đọc tên lỗi và số dòng trước tiên.",
+            "Sửa MỘT lỗi, chạy lại, rồi mới sửa lỗi tiếp theo.",
+            "Code chạy mà kết quả sai là lỗi logic: in giá trị ra từng bước để tìm chỗ lệch.",
+        ],
+    ),
+}
+
+
+def lesson_for_world(world_number: int) -> WorldLesson | None:
+    return WORLD_LESSONS.get(world_number)
+
+
+# ======================================================================
 # theory_view.py
 # ======================================================================
 
 THEORY_COLOR_TEXT = (230, 232, 240)
 THEORY_COLOR_MUTED = (160, 166, 190)
 THEORY_COLOR_HEADING = (255, 196, 64)
+THEORY_COLOR_SUBHEADING = (120, 200, 255)
 THEORY_COLOR_TAG = (90, 210, 230)
+THEORY_COLOR_TERM = (255, 220, 140)
 THEORY_COLOR_INLINE_CODE = (120, 230, 160)
 THEORY_COLOR_CODE_BACKGROUND = (30, 32, 44)
 THEORY_COLOR_PANEL = (18, 20, 30)
 THEORY_COLOR_BORDER = (98, 114, 164)
+THEORY_COLOR_SELECTION = (52, 78, 140)
 PADDING = 22
+AUTO_SCROLL_MARGIN = 36
+AUTO_SCROLL_SPEED = 14
+
+STYLE_PLAIN = "plain"
+STYLE_CODE = "code"
+STYLE_BOLD = "bold"
 
 
 def rich_words(text: str) -> list[tuple[str, bool]]:
@@ -8419,10 +9284,17 @@ class TheoryView:
         self.font_title = font_title
         self.font_code = font_code
         self.operations: list[tuple[int, Callable[[pygame.Surface, int, int], None]]] = []
+        self.copy_lines: list[tuple[int, int, str]] = []
         self.content_height = 0
+        self.content_width = 100
         self.scroll = 0
         self.rect = pygame.Rect(0, 0, 100, 100)
         self.close_rect = pygame.Rect(0, 0, 0, 0)
+        self.copy_rect = pygame.Rect(0, 0, 0, 0)
+        self.selection_anchor: int | None = None
+        self.selection_end: int | None = None
+        self.dragging = False
+        self.copied_line_count = 0
 
     # ------------------------------------------------------------ layout
     def build(
@@ -8433,19 +9305,31 @@ class TheoryView:
         rect: pygame.Rect,
         inputs: dict[str, Any],
         goal: str,
+        lesson: WorldLesson | None = None,
     ) -> None:
         self.rect = rect
         self.scroll = 0
         self.operations = []
+        self.copy_lines = []
+        self.clear_selection()
         width = rect.width - PADDING * 2 - 12
+        self.content_width = width
         y = 0
 
-        y = self._add_text(title, self.font_title, THEORY_COLOR_HEADING, y, width - 110)
-        y = self._add_text(tag, self.font, THEORY_COLOR_TAG, y + 2, width - 110)
+        y = self._add_text(title, self.font_title, THEORY_COLOR_HEADING, y, width - 220)
+        y = self._add_text(tag, self.font, THEORY_COLOR_TAG, y + 2, width - 220)
+        hint = "Kéo chuột để chọn dòng, rồi Ctrl+C hoặc nút Sao chép (chưa chọn thì chép cả bài)."
+        y = self._add_text(hint, self.font, THEORY_COLOR_MUTED, y + 2, width)
         y += 8
         y = self._add_heading("Khái niệm", y)
         for paragraph in theory.concept:
             y = self._add_rich("•  " + paragraph, y, width) + 6
+
+        terms = find_terms(theory_text(theory))
+        if terms:
+            y = self._add_heading("Từ khó trong bài", y + 6)
+            for glossary_term in terms:
+                y = self._add_rich(glossary_term.meaning, y, width, bold_prefix=f"•  {glossary_term.term}:") + 4
 
         y = self._add_heading("Đề bài", y + 6)
         y = self._add_rich("Kết quả cần đạt: " + goal, y, width) + 4
@@ -8458,6 +9342,9 @@ class TheoryView:
             y = self._add_heading("Giải thích code ban đầu của màn", y + 6)
             y = self._add_code_pairs(theory.starter_notes, y, width)
 
+        if lesson is not None:
+            y = self._add_lesson(lesson, y, width)
+
         y = self._add_heading("Ví dụ minh hoạ (khác lời giải - hãy tự áp dụng)", y + 6)
         y = self._add_code_pairs(theory.example, y, width)
 
@@ -8467,26 +9354,66 @@ class TheoryView:
                 y = self._add_rich("•  " + mistake, y, width) + 4
         self.content_height = y + PADDING
 
+    def _add_lesson(self, lesson: WorldLesson, y: int, width: int) -> int:
+        y = self._add_heading("Hiểu kỹ hơn", y + 6)
+        y = self._add_subheading("Hình dung đời thường", y)
+        y = self._add_rich(lesson.analogy, y, width) + 8
+        y = self._add_subheading("Mẫu câu lệnh - từng phần nghĩa là gì", y)
+        y = self._add_code_pairs(lesson.syntax, y, width)
+        y = self._add_subheading("Chạy thử trong đầu - Python làm gì ở từng dòng", y)
+        y = self._add_code_pairs(lesson.walkthrough, y, width)
+        y = self._add_subheading("Mẹo nhớ", y)
+        for tip in lesson.tips:
+            y = self._add_rich("•  " + tip, y, width) + 4
+        return y
+
     def _add(self, y: int, draw: Callable[[pygame.Surface, int, int], None]) -> None:
         self.operations.append((y, draw))
+
+    def _add_copy_line(self, top: int, bottom: int, text: str) -> None:
+        self.copy_lines.append((top, bottom, text))
 
     def _add_text(self, text: str, font: pygame.font.Font, color: tuple[int, int, int], y: int, width: int) -> int:
         for line in self._wrap_plain(text, font, width):
             rendered = font.render(line, True, color)
             self._add(y, lambda surface, x, top, image=rendered: surface.blit(image, (x, top)))
+            self._add_copy_line(y, y + font.get_linesize(), line)
             y += font.get_linesize()
         return y
 
     def _add_heading(self, text: str, y: int) -> int:
         rendered = self.font_bold.render(text, True, THEORY_COLOR_HEADING)
         self._add(y + 4, lambda surface, x, top, image=rendered: surface.blit(image, (x, top)))
-        return y + self.font_bold.get_linesize() + 10
+        bottom = y + self.font_bold.get_linesize() + 10
+        self._add_copy_line(y, bottom, "\n" + text.upper())
+        return bottom
 
-    def _add_rich(self, text: str, y: int, width: int, indent: int = 0) -> int:
+    def _add_subheading(self, text: str, y: int) -> int:
+        rendered = self.font_bold.render(text, True, THEORY_COLOR_SUBHEADING)
+        self._add(y, lambda surface, x, top, image=rendered: surface.blit(image, (x, top)))
+        bottom = y + self.font_bold.get_linesize() + 6
+        self._add_copy_line(y, bottom, f"[{text}]")
+        return bottom
+
+    def _styled_words(self, text: str, bold_prefix: str) -> list[tuple[str, str]]:
+        words = [(word, STYLE_BOLD) for word in bold_prefix.split(" ") if word]
+        for word, is_code in rich_words(text):
+            words.append((word, STYLE_CODE if is_code else STYLE_PLAIN))
+        return words
+
+    def _render_word(self, word: str, style: str) -> pygame.Surface:
+        if style == STYLE_CODE:
+            return self.font_code.render(word, True, THEORY_COLOR_INLINE_CODE)
+        if style == STYLE_BOLD:
+            return self.font_bold.render(word, True, THEORY_COLOR_TERM)
+        return self.font.render(word, True, THEORY_COLOR_TEXT)
+
+    def _add_rich(self, text: str, y: int, width: int, indent: int = 0, bold_prefix: str = "") -> int:
         space = self.font.size(" ")[0]
         line_height = self.font.get_linesize() + 2
         cursor_x = indent
-        line_items: list[tuple[int, pygame.Surface, Any]] = []
+        line_items: list[tuple[int, pygame.Surface, bool]] = []
+        line_words: list[str] = []
 
         def flush(top: int) -> None:
             items = list(line_items)
@@ -8499,17 +9426,19 @@ class TheoryView:
                     surface.blit(image, (x + offset, current_top))
 
             self._add(top, draw)
+            self._add_copy_line(top, top + line_height, " ".join(line_words))
             line_items.clear()
+            line_words.clear()
 
-        for word, is_code in rich_words(text):
-            font = self.font_code if is_code else self.font
-            color = THEORY_COLOR_INLINE_CODE if is_code else THEORY_COLOR_TEXT
-            image = font.render(word, True, color)
+        for word, style in self._styled_words(text, bold_prefix):
+            is_code = style == STYLE_CODE
+            image = self._render_word(word, style)
             if cursor_x + image.get_width() > width and line_items:
                 flush(y)
                 y += line_height
                 cursor_x = indent + space * 4
             line_items.append((cursor_x, image, is_code))
+            line_words.append(word)
             cursor_x += image.get_width() + space + (4 if is_code else 0)
         if line_items:
             flush(y)
@@ -8531,6 +9460,7 @@ class TheoryView:
                     cursor += char_width * len(text)
 
             self._add(y, draw_code)
+            self._add_copy_line(y - 2, y + code_height, code)
             y += code_height + 2
             if note:
                 y = self._add_note("→ " + note, y, width)
@@ -8541,6 +9471,7 @@ class TheoryView:
         for line in self._wrap_plain(text, self.font, width - 24):
             rendered = self.font.render(line, True, THEORY_COLOR_MUTED)
             self._add(y, lambda surface, x, top, image=rendered: surface.blit(image, (x + 18, top)))
+            self._add_copy_line(y, y + self.font.get_linesize(), "    " + line)
             y += self.font.get_linesize()
         return y
 
@@ -8558,19 +9489,100 @@ class TheoryView:
         lines.append(current)
         return lines
 
+    # ------------------------------------------------------------ selection and copy
+    @property
+    def has_selection(self) -> bool:
+        return self.selection_anchor is not None and self.selection_end is not None
+
+    def clear_selection(self) -> None:
+        self.selection_anchor = None
+        self.selection_end = None
+        self.dragging = False
+
+    def select_all(self) -> None:
+        if not self.copy_lines:
+            return
+        self.selection_anchor = 0
+        self.selection_end = len(self.copy_lines) - 1
+
+    def selected_range(self) -> range:
+        if self.selection_anchor is None or self.selection_end is None:
+            return range(0)
+        first = min(self.selection_anchor, self.selection_end)
+        last = max(self.selection_anchor, self.selection_end)
+        return range(first, last + 1)
+
+    def copy_text(self) -> str:
+        """Chữ sẽ được chép: các dòng đang chọn, hoặc cả bài nếu chưa chọn gì."""
+        indexes = self.selected_range() if self.has_selection else range(len(self.copy_lines))
+        lines = [self.copy_lines[index][2] for index in indexes]
+        return "\n".join(lines).strip("\n") + "\n"
+
+    def copy(self) -> str:
+        text = self.copy_text()
+        _set_clipboard(text)
+        self.copied_line_count = len(self.selected_range()) if self.has_selection else len(self.copy_lines)
+        return "copied"
+
+    def _content_top(self) -> int:
+        return self.rect.y + PADDING - self.scroll
+
+    def _line_at(self, screen_y: int) -> int:
+        content_y = screen_y - self._content_top()
+        found = 0
+        for index, (top, _bottom, _text) in enumerate(self.copy_lines):
+            if top > content_y:
+                break
+            found = index
+        return found
+
+    def _start_selection(self, screen_y: int) -> None:
+        if not self.copy_lines:
+            return
+        line_index = self._line_at(screen_y)
+        self.selection_anchor = line_index
+        self.selection_end = line_index
+        self.dragging = True
+
     # ------------------------------------------------------------ events
     def handle_event(self, event: pygame.event.Event) -> str | None:
-        """Returns "close" when the panel should close, "used" when the event was consumed."""
+        """Returns "close", "copied", or "used" when the event was consumed."""
         if event.type == pygame.MOUSEWHEEL and self.rect.collidepoint(mouse_pos()):
             self._scroll_by(-event.y * 48)
             return "used"
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.close_rect.collidepoint(event.pos):
-                return "close"
-            if self.rect.collidepoint(event.pos):
-                return "used"
-        if event.type == pygame.KEYDOWN and event.key in (pygame.K_PAGEDOWN, pygame.K_PAGEUP):
+            return self._handle_click(event.pos)
+        if event.type == pygame.MOUSEMOTION and self.dragging:
+            self.selection_end = self._line_at(event.pos[1])
+            return "used"
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging:
+            self.dragging = False
+            return "used"
+        if event.type == pygame.KEYDOWN:
+            return self._handle_key(event)
+        return None
+
+    def _handle_click(self, position: tuple[int, int]) -> str | None:
+        if self.close_rect.collidepoint(position):
+            return "close"
+        if self.copy_rect.collidepoint(position):
+            return self.copy()
+        if not self.rect.collidepoint(position):
+            self.clear_selection()
+            return None
+        self._start_selection(position[1])
+        return "used"
+
+    def _handle_key(self, event: pygame.event.Event) -> str | None:
+        if event.key in (pygame.K_PAGEDOWN, pygame.K_PAGEUP):
             self._scroll_by(300 if event.key == pygame.K_PAGEDOWN else -300)
+            return "used"
+        if not event.mod & pygame.KMOD_CTRL:
+            return None
+        if event.key == pygame.K_c and self.has_selection:
+            return self.copy()
+        if event.key == pygame.K_a and self.rect.collidepoint(mouse_pos()):
+            self.select_all()
             return "used"
         return None
 
@@ -8578,8 +9590,21 @@ class TheoryView:
         maximum = max(0, self.content_height - self.rect.height + PADDING)
         self.scroll = max(0, min(maximum, self.scroll + amount))
 
+    def _auto_scroll_while_dragging(self) -> None:
+        if not self.dragging:
+            return
+        mouse_y = mouse_pos()[1]
+        if mouse_y < self.rect.y + AUTO_SCROLL_MARGIN:
+            self._scroll_by(-AUTO_SCROLL_SPEED)
+        elif mouse_y > self.rect.bottom - AUTO_SCROLL_MARGIN:
+            self._scroll_by(AUTO_SCROLL_SPEED)
+        else:
+            return
+        self.selection_end = self._line_at(mouse_y)
+
     # ------------------------------------------------------------ drawing
     def draw(self, surface: pygame.Surface) -> None:
+        self._auto_scroll_while_dragging()
         self._scroll_by(0)
         pygame.draw.rect(surface, THEORY_COLOR_PANEL, self.rect, border_radius=12)
         pygame.draw.rect(surface, THEORY_COLOR_BORDER, self.rect, width=2, border_radius=12)
@@ -8587,7 +9612,8 @@ class TheoryView:
         previous_clip = surface.get_clip()
         surface.set_clip(self.rect.inflate(-4, -4))
         left = self.rect.x + PADDING
-        top = self.rect.y + PADDING - self.scroll
+        top = self._content_top()
+        self._draw_selection(surface, left, top)
         for offset, draw in self.operations:
             screen_y = top + offset
             if self.rect.y - 80 < screen_y < self.rect.bottom + 10:
@@ -8595,11 +9621,29 @@ class TheoryView:
         surface.set_clip(previous_clip)
 
         self._draw_scrollbar(surface)
+        self.copy_rect = pygame.Rect(self.rect.right - 216, self.rect.y + 14, 98, 36)
         self.close_rect = pygame.Rect(self.rect.right - 110, self.rect.y + 14, 92, 36)
-        hovered = self.close_rect.collidepoint(mouse_pos())
-        pygame.draw.rect(surface, (150, 70, 80) if hovered else (120, 60, 70), self.close_rect, border_radius=8)
-        label = self.font_bold.render("Đóng", True, THEORY_COLOR_TEXT)
-        surface.blit(label, label.get_rect(center=self.close_rect.center))
+        self._draw_button(surface, self.copy_rect, "Sao chép", (46, 110, 150), (60, 135, 180))
+        self._draw_button(surface, self.close_rect, "Đóng", (120, 60, 70), (150, 70, 80))
+
+    def _draw_button(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        label: str,
+        color: tuple[int, int, int],
+        hover_color: tuple[int, int, int],
+    ) -> None:
+        hovered = rect.collidepoint(mouse_pos())
+        pygame.draw.rect(surface, hover_color if hovered else color, rect, border_radius=8)
+        rendered = self.font_bold.render(label, True, THEORY_COLOR_TEXT)
+        surface.blit(rendered, rendered.get_rect(center=rect.center))
+
+    def _draw_selection(self, surface: pygame.Surface, left: int, top: int) -> None:
+        for index in self.selected_range():
+            line_top, line_bottom, _text = self.copy_lines[index]
+            highlight_rect = pygame.Rect(left - 6, top + line_top, self.content_width + 12, line_bottom - line_top)
+            pygame.draw.rect(surface, THEORY_COLOR_SELECTION, highlight_rect)
 
     def _draw_scrollbar(self, surface: pygame.Surface) -> None:
         visible = self.rect.height
@@ -10963,6 +12007,7 @@ class App:
             rect=THEORY_RECT,
             inputs=level.extra_globals,
             goal=level.goal,
+            lesson=lesson_for_world(world.number),
         )
         self.show_theory = level.id not in self.progress.completed
         self._build_play_buttons()
@@ -11121,6 +12166,11 @@ class App:
             outcome = self.theory_view.handle_event(event)
             if outcome == "close":
                 self.show_theory = False
+                return
+            if outcome == "copied":
+                line_count = self.theory_view.copied_line_count
+                self.show_toast(f"Đã chép {line_count} dòng lý thuyết - dán bằng Ctrl+V.", 3.0)
+                self.sound.play("click")
                 return
             if outcome == "used":
                 return
