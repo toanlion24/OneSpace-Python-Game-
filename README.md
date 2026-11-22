@@ -12,7 +12,8 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
 - **Lý thuyết đi kèm từng màn**: khái niệm, **Từ khó trong bài** (giải thích thuật ngữ bằng lời đời thường),
   đề bài, dữ liệu có sẵn, giải thích từng dòng code ban đầu, mục **Hiểu kỹ hơn** của từng World (hình dung
   đời thường, mẫu câu lệnh, chạy thử từng dòng, mẹo nhớ), ví dụ minh hoạ (khác lời giải) và các lỗi hay gặp.
-- **Chép được lý thuyết**: kéo chuột chọn dòng rồi Ctrl+C, hoặc nút Sao chép (chưa chọn thì chép cả bài).
+- **Chép được lý thuyết**: kéo chuột bôi đen là tự chép, nhấn đúp chọn một từ, nhấn 3 lần chép cả đoạn;
+  Ctrl+C / Ctrl+A, hoặc nút Sao chép (chưa chọn thì chép cả bài).
 - **Tự suy nghĩ**: game không hiện lời giải; nút Gợi ý chỉ gợi hướng.
 - **Bản đồ kiểm tra ẩn**: nhiều màn chạy thêm code trên bản đồ dài hơn hoặc dữ liệu khác;
   code "gõ cứng" (đếm ô, gõ thẳng đáp án) sẽ bị phát hiện, và game diễn lại bản đồ ẩn để em thấy sai ở đâu.

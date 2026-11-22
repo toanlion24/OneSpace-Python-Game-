@@ -23,6 +23,7 @@ def view():
 
 def build(view, level_id="2-1", lesson_world=2):
     level = next(level for level in LEVELS if level.id == level_id)
+    view.clock = lambda: 0
     view.build(
         title="Lý thuyết",
         tag="Kỹ năng",
@@ -72,32 +73,92 @@ def test_every_level_explains_some_terms(level):
 def test_view_shows_lesson_and_glossary(view):
     build(view)
     text = view.copy_text()
-    assert "HIỂU KỸ HƠN" in text
-    assert "TỪ KHÓ TRONG BÀI" in text
-    assert "Biến:" in text
+    assert "Hiểu kỹ hơn" in text
+    assert "\n\nTừ khó trong bài" in text
+    assert "Biến: Một chiếc hộp" in text
     assert "coins = coins - price" in text
 
 
 def test_copy_all_without_selection(view):
     build(view)
     assert view.copy() == "copied"
-    assert view.copied_line_count == len(view.copy_lines)
+    assert view.copied_character_count == len(view.copy_text().strip())
 
 
-def test_drag_selects_lines_and_copies_only_them(view):
+def line_index_of(view, text):
+    return next(index for index, line in enumerate(view.lines) if line.text == text)
+
+
+def screen_point(view, line_index, char_index):
+    line = view.lines[line_index]
+    view.scroll = max(0, line.top - 100)
+    area = view.content_area
+    return area.x + line.char_x[char_index], area.y - view.scroll + line.top + 4
+
+
+def mouse(event_type, position):
+    if event_type == pygame.MOUSEMOTION:
+        return pygame.event.Event(event_type, pos=position, rel=(0, 0), buttons=(1, 0, 0))
+    return pygame.event.Event(event_type, button=1, pos=position)
+
+
+def test_drag_selects_characters_and_copies_on_release(view):
     build(view)
-    first_code = next(index for index, line in enumerate(view.copy_lines) if line[2] == "coins = 10")
-    view.scroll = view.copy_lines[first_code][0] - 100
-    top = view.rect.y + 22 - view.scroll
-    start_y = top + view.copy_lines[first_code][0] + 2
-    end_y = top + view.copy_lines[first_code + 2][0] + 2
-    view.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=(100, start_y)))
-    view.handle_event(pygame.event.Event(pygame.MOUSEMOTION, pos=(100, end_y), rel=(0, 0), buttons=(1, 0, 0)))
-    view.handle_event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1, pos=(100, end_y)))
+    view.clock = lambda: 0
+    first = line_index_of(view, "coins = 10")
+    start = screen_point(view, first, 0)
+    end = (view.content_area.x + view.lines[first].char_x[5], start[1])
+    assert view.handle_event(mouse(pygame.MOUSEBUTTONDOWN, start)) == "used"
+    view.handle_event(mouse(pygame.MOUSEMOTION, end))
+    assert view.handle_event(mouse(pygame.MOUSEBUTTONUP, end)) == "copied"
+    assert view.copy_text() == "coins"
+
+
+def test_drag_across_lines(view):
+    build(view)
+    view.clock = lambda: 0
+    first = line_index_of(view, "coins = 10")
+    start = screen_point(view, first, 0)
+    price_line = view.lines[line_index_of(view, "price = 3")]
+    end = (view.content_area.x + price_line.char_x[5], view.content_area.y - view.scroll + price_line.top + 4)
+    view.handle_event(mouse(pygame.MOUSEBUTTONDOWN, start))
+    view.handle_event(mouse(pygame.MOUSEMOTION, end))
+    view.handle_event(mouse(pygame.MOUSEBUTTONUP, end))
+    assert view.copy_text() == "coins = 10\n→ Tạo hộp coins, cất số 10.\nprice"
+
+
+def test_double_click_selects_word_and_triple_click_copies_block(view):
+    build(view)
+    view.clock = lambda: 1000
+    point = screen_point(view, line_index_of(view, "coins = coins - price"), 9)
+    view.handle_event(mouse(pygame.MOUSEBUTTONDOWN, point))
+    view.handle_event(mouse(pygame.MOUSEBUTTONUP, point))
+    view.handle_event(mouse(pygame.MOUSEBUTTONDOWN, point))
+    assert view.copy_text() == "coins"
+    assert view.handle_event(mouse(pygame.MOUSEBUTTONDOWN, point)) == "copied"
+    assert view.copy_text() == "coins = coins - price"
+
+
+def test_triple_click_copies_whole_wrapped_paragraph(view):
+    build(view)
+    view.clock = lambda: 1000
+    wrapped = next(index for index, line in enumerate(view.lines) if line.joins_previous)
+    point = screen_point(view, wrapped, 2)
+    for _click in range(3):
+        result = view.handle_event(mouse(pygame.MOUSEBUTTONDOWN, point))
+    assert result == "copied"
     copied = view.copy_text()
-    assert copied.startswith("coins = 10")
-    assert "KHÁI NIỆM" not in copied
-    assert len(copied.strip().split("\n")) == 3
+    assert view.lines[wrapped].text in copied
+    assert "\n" not in copied
+
+
+def test_slow_clicks_do_not_count_as_triple(view):
+    build(view)
+    times = iter([0, 1000, 2000])
+    view.clock = lambda: next(times)
+    point = screen_point(view, line_index_of(view, "coins = 10"), 2)
+    results = [view.handle_event(mouse(pygame.MOUSEBUTTONDOWN, point)) for _click in range(3)]
+    assert results == ["used", "used", "used"]
 
 
 def test_ctrl_c_needs_selection(view):

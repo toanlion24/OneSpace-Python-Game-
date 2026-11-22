@@ -868,8 +868,8 @@ class App:
                 self.show_theory = False
                 return
             if outcome == "copied":
-                line_count = self.theory_view.copied_line_count
-                self.show_toast(f"Đã chép {line_count} dòng lý thuyết - dán bằng Ctrl+V.", 3.0)
+                character_count = self.theory_view.copied_character_count
+                self.show_toast(f"Đã chép {character_count} ký tự - dán bằng Ctrl+V.", 3.0)
                 self.sound.play("click")
                 return
             if outcome == "used":
