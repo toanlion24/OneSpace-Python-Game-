@@ -18,16 +18,21 @@ OUTPUT = ROOT / "codequest_full.py"
 MODULE_ORDER = [
     "telex",
     "engine",
+    "par",
     "levels_practice",
     "levels",
     "theory",
     "theory_practice",
+    "rewards",
     "display",
     "completion",
     "editor",
     "theory_view",
     "assets",
+    "hud",
+    "sound",
     "progress",
+    "store_view",
     "game",
 ]
 
@@ -36,6 +41,7 @@ RENAMES: dict[str, dict[str, str]] = {
     "levels": {"World": "WorldInfo"},
     "editor": {r"COLOR_(\w+)": r"CODE_COLOR_\1"},
     "theory_view": {r"COLOR_(\w+)": r"THEORY_COLOR_\1"},
+    "store_view": {r"COLOR_(\w+)": r"STORE_COLOR_\1"},
 }
 
 SOURCE_REPLACEMENTS: dict[str, list[tuple[str, str]]] = {
@@ -82,20 +88,28 @@ def split_module(module: str) -> tuple[list[str], str]:
     return imports, apply_renames(module, body).strip("\n")
 
 
+def _import_order(name: str) -> tuple[int, str]:
+    """isort-style order: CONSTANTS, then Classes, then functions."""
+    if name.isupper():
+        return (0, name)
+    return (1 if name[0].isupper() else 2, name)
+
+
 def merge_imports(all_imports: list[str]) -> list[str]:
     plain: set[str] = set()
     from_imports: dict[str, set[str]] = {}
     for statement in all_imports:
         node = ast.parse(statement).body[0]
         if isinstance(node, ast.Import):
-            plain.update(alias.name for alias in node.names)
+            plain.update(f"{alias.name} as {alias.asname}" if alias.asname else alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             from_imports.setdefault(node.module, set()).update(alias.name for alias in node.names)
 
-    stdlib = sorted(name for name in plain if name != "pygame")
+    third_party = {"pygame", "numpy as np"}
+    stdlib = sorted(name for name in plain if name not in third_party)
     lines = [f"import {name}" for name in stdlib]
-    lines += [f"from {module} import {', '.join(sorted(names))}" for module, names in sorted(from_imports.items())]
-    lines += ["", "import pygame"]
+    lines += [f"from {module} import {', '.join(sorted(names, key=_import_order))}" for module, names in sorted(from_imports.items())]
+    lines += ["", *[f"import {name}" for name in sorted(plain & third_party)]]
     return lines
 
 

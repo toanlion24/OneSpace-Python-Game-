@@ -21,9 +21,33 @@ from .assets import (
 )
 from .display import VIEWPORT, mouse_pos, to_logical_event
 from .editor import CodeEditor
-from .engine import MAX_HERO_HP, Level, RunResult, World, requirement_label, run_code
+from .engine import (
+    Level,
+    RunResult,
+    World,
+    hero_hp_limits,
+    requirement_label,
+    run_code,
+    upgrades_apply,
+)
+from .hud import Confetti, draw_coin, draw_shield, draw_star, draw_star_row
 from .levels import STAGES, WORLDS, all_levels, world_of
 from .progress import Progress
+from .rewards import (
+    WORLD_CHEST_COINS,
+    RewardSummary,
+    apply_win,
+    bonus_hp,
+    has_shield,
+    par_for,
+    rank_for,
+    skin_number,
+    star_flags,
+    star_goals,
+    total_stars,
+)
+from .sound import SoundBoard
+from .store_view import StoreView
 from .theory import THEORY
 from .theory_view import TheoryView
 
@@ -63,6 +87,7 @@ EVENT_DURATIONS: dict[str, float] = {
     "info": 0.2,
     "hurt": 0.4,
     "heal": 0.5,
+    "shield": 0.4,
     "gem": 0.05,
     "door_open": 0.3,
     "jam": 0.35,
@@ -122,11 +147,38 @@ class Button:
         surface.blit(label, label.get_rect(center=self.rect.center))
 
 
+class LevelButton(Button):
+    """Menu button for one level, showing the best stars earned."""
+
+    def __init__(self, rect: pygame.Rect, label: str, on_click: Callable[[], None],
+                 color: tuple[int, int, int], stars: int) -> None:
+        super().__init__(rect, label, on_click, color)
+        self.stars = stars
+
+    def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
+        hovered = self.rect.collidepoint(mouse_pos())
+        color = tuple(min(255, channel + 30) for channel in self.color) if hovered else self.color
+        pygame.draw.rect(surface, color, self.rect, border_radius=8)
+        pygame.draw.rect(surface, (255, 255, 255, 40), self.rect, width=1, border_radius=8)
+        label = font.render(self.label, True, COLOR_TEXT)
+        surface.blit(label, label.get_rect(center=(self.rect.centerx, self.rect.centery - 6)))
+        draw_star_row(surface, (self.rect.centerx, self.rect.bottom - 9), 5, self.stars)
+
+
 class Playback:
     """Replays recorded engine events as an animation."""
 
-    def __init__(self, level: Level) -> None:
+    def __init__(
+        self,
+        level: Level,
+        bonus_hp: int = 0,
+        shield: bool = False,
+        sound: Callable[[str], None] | None = None,
+    ) -> None:
         self.level = level
+        self.bonus_hp = bonus_hp
+        self.has_shield = shield and upgrades_apply(level)
+        self.sound = sound or (lambda name: None)
         self.terrain_world = World(level)
         self.events: list[dict[str, Any]] = []
         self.result: RunResult | None = None
@@ -136,7 +188,8 @@ class Playback:
         world = self.terrain_world
         self.hero_position = pygame.Vector2(world.hero_start)
         self.facing = "right"
-        self.hp = self.level.start_hp
+        self.hp, self.max_hp = hero_hp_limits(self.level, self.bonus_hp)
+        self.shield = self.has_shield
         self.gems = dict(world.gems)
         self.enemies = {pos: enemy.kind for pos, enemy in world.enemies.items()}
         self.doors = dict(world.doors)
@@ -207,6 +260,12 @@ class Playback:
         if kind == "move":
             self.facing = event["direction"]
             self._set_hero_state("run")
+            self.sound("step")
+        elif kind == "shield":
+            self.shield = False
+            self._float("Khiên!", COLOR_INFO, self.hero_position)
+            log(event["text"], COLOR_INFO)
+            self.sound("shield")
         elif kind == "bump":
             self.facing = event["direction"]
             self._set_hero_state("hit")
@@ -216,6 +275,7 @@ class Playback:
             target = tuple(event["target"])
             if event["hit"]:
                 self.enemy_flash[target] = 0.3
+                self.sound("hit")
         elif kind == "say":
             self.bubble = (event["text"], 2.2)
             log(f"Hero: {event['text']}", COLOR_ACCENT)
@@ -228,6 +288,7 @@ class Playback:
             self._set_hero_state("hit")
             self._float("-1 ♥", COLOR_BAD, self.hero_position)
             log(event["text"], COLOR_BAD)
+            self.sound("hurt")
         elif kind == "heal":
             self.hp = event["hp"]
             self._float(f"+{event['amount']} ♥", COLOR_GOOD, self.hero_position)
@@ -236,9 +297,11 @@ class Playback:
             position = tuple(event["pos"])
             self.gems.pop(position, None)
             self._float("+1", COLOR_ACCENT, pygame.Vector2(position))
+            self.sound("gem")
         elif kind == "door_open":
             self.doors.pop(tuple(event["pos"]), None)
             log("Cửa đã mở!", COLOR_GOOD)
+            self.sound("door")
         elif kind == "jam":
             self.door_shake[tuple(event["pos"])] = 0.35
             log("DoorJammed: cửa bị kẹt!", COLOR_BAD)
@@ -342,11 +405,16 @@ class App:
         self.assets = Assets()
         self.logo = load_logo(96)
         self.progress = Progress(PROGRESS_FILE, backup_dir())
+        self.sound = SoundBoard(self.progress.muted)
+        self.confetti = Confetti()
+        self.win_summary: RewardSummary | None = None
+        self.win_time = 0.0
+        self.store = StoreView(self)
         self.editor = CodeEditor(self.font_code, self.font_small)
         self.levels = all_levels()
         self.scene = "menu"
         self.level: Level = self.levels[0]
-        self.playback = Playback(self.level)
+        self.playback = self._new_playback(self.level)
         self.console: list[tuple[str, tuple[int, int, int]]] = []
         self.hint_index = 0
         self.speed_options = [1.0, 2.0, 4.0]
@@ -359,10 +427,8 @@ class App:
         self.play_buttons: list[Button] = []
         self.win_buttons: list[Button] = []
         self.menu_stage = self._first_unfinished_stage()
-        self.menu_tool_buttons = [
-            Button(pygame.Rect(1020, 30, 196, 36), "Sao lưu tiến độ", self.backup_progress, (46, 120, 90)),
-            Button(pygame.Rect(1020, 72, 196, 36), "Khôi phục tiến độ", self.restore_progress, (90, 80, 140)),
-        ]
+        self.menu_tool_buttons: list[Button] = []
+        self._build_tool_buttons()
         self.toast: tuple[str, float] | None = None
         if self.progress.restored_from_backup:
             self.show_toast("Đã tự khôi phục tiến độ từ bản sao lưu trong Documents.")
@@ -378,6 +444,42 @@ class App:
     @staticmethod
     def _stage_worlds(stage_number: int) -> list[Any]:
         return [world for world in WORLDS if world.stage == stage_number]
+
+    @staticmethod
+    def make_button(
+        rect: pygame.Rect, label: str, on_click: Callable[[], None], color: tuple[int, int, int] = (70, 80, 120)
+    ) -> Button:
+        return Button(rect, label, on_click, color)
+
+    def _upgrades(self) -> tuple[int, bool]:
+        return bonus_hp(self.progress), has_shield(self.progress)
+
+    def _new_playback(self, level: Level) -> Playback:
+        bonus_hp, shield = self._upgrades()
+        return Playback(level, bonus_hp, shield, self.sound.play)
+
+    def _build_tool_buttons(self) -> None:
+        sound_label = "Âm: Tắt" if self.sound.muted else "Âm: Bật"
+        self.menu_tool_buttons = [
+            Button(pygame.Rect(1020, 30, 196, 36), "Sao lưu tiến độ", self.backup_progress, (46, 120, 90)),
+            Button(pygame.Rect(1020, 72, 196, 36), "Khôi phục tiến độ", self.restore_progress, (90, 80, 140)),
+            Button(pygame.Rect(812, 30, 196, 36), "Cửa hàng & Huy hiệu", self.open_store, (170, 120, 40)),
+            Button(pygame.Rect(812, 72, 96, 36), sound_label, self.toggle_sound, (70, 80, 120)),
+        ]
+
+    def toggle_sound(self) -> None:
+        self.sound.muted = not self.sound.muted
+        self.progress.muted = self.sound.muted
+        self.progress.save()
+        self._build_tool_buttons()
+        self._build_play_buttons()
+        self.sound.play("click")
+
+    def open_store(self) -> None:
+        self.save_code()
+        self.scene = "store"
+        self.store.build()
+        self.sound.play("click")
 
     def select_stage(self, stage_number: int) -> None:
         self.menu_stage = stage_number
@@ -426,11 +528,12 @@ class App:
             cell_x, cell_y = self._world_cell(world_index)
             for level_index, level in enumerate(world.levels):
                 rect = pygame.Rect(
-                    cell_x + MENU_LEVELS_OFFSET + level_index * (MENU_LEVEL_WIDTH + 6), cell_y + 6, MENU_LEVEL_WIDTH, 40
+                    cell_x + MENU_LEVELS_OFFSET + level_index * (MENU_LEVEL_WIDTH + 6), cell_y + 2, MENU_LEVEL_WIDTH, 50
                 )
                 done = level.id in self.progress.completed
                 color = (46, 140, 86) if done else (70, 80, 120)
-                self.menu_buttons.append(Button(rect, level.id, lambda lv=level: self.open_level(lv), color))
+                stars = self.progress.stars.get(level.id, 0)
+                self.menu_buttons.append(LevelButton(rect, level.id, lambda lv=level: self.open_level(lv), color, stars))
 
     @staticmethod
     def _world_cell(world_index: int) -> tuple[int, int]:
@@ -455,12 +558,15 @@ class App:
             rect = pygame.Rect(x + index * (width + gap), BUTTON_Y, width, 48)
             self.play_buttons.append(Button(rect, label, callback, color))
         self.play_buttons.append(Button(pygame.Rect(16, 14, 100, 36), "← Menu", self.go_menu))
+        sound_label = "Âm: Tắt" if self.sound.muted else "Âm: Bật"
+        self.play_buttons.append(Button(pygame.Rect(1160, 14, 104, 36), sound_label, self.toggle_sound))
 
     def open_level(self, level: Level) -> None:
         self.save_code()
         self.level = level
         self.scene = "play"
-        self.playback = Playback(level)
+        self.playback = self._new_playback(level)
+        self.win_summary = None
         self.editor.set_text(self.progress.code.get(level.id, level.starter))
         self.editor.extra_names = list(level.extra_globals)
         self.editor.focused = True
@@ -511,7 +617,8 @@ class App:
         self.show_win = False
         self.console = []
         self.log("Đang chạy...", COLOR_MUTED)
-        result = run_code(self.level, self.editor.text)
+        bonus_hp, shield = self._upgrades()
+        result = run_code(self.level, self.editor.text, bonus_hp, shield)
         self.editor.error_line = result.error_line
         self.playback.start(result)
 
@@ -548,19 +655,33 @@ class App:
             return
         if result.won:
             self.log("[OK] " + result.message, COLOR_GOOD)
-            self.progress.completed.add(self.level.id)
+            world = world_of(self.level.id)
+            flags = star_flags(result, self.level.id)
+            summary = apply_win(self.progress, self.level, world.levels, world.number, flags)
             self.progress.save()
+            self.win_summary = summary
+            self.win_time = 0.0
+            if not flags[1]:
+                self.log(f"Sao 2: hãy thử qua màn mà không mất máu (vừa mất {result.damage_taken}).", COLOR_INFO)
+            if not flags[2]:
+                limit = par_for(self.level.id)
+                self.log(f"Sao 3: code đang có {result.code_lines} dòng - thử rút gọn còn tối đa {limit} dòng.", COLOR_INFO)
+            if summary.coins:
+                self.log(f"Nhận {summary.coins} xu!", COLOR_ACCENT)
+            self.sound.play("chest" if summary.chest_world else "win")
+            self.confetti.burst(VIEW_RECT, 140 if summary.chest_world else 90)
             self.show_win = True
-            center = pygame.Rect(0, 0, 160, 46)
-            center.center = (VIEW_RECT.centerx - 90, VIEW_RECT.centery + 50)
-            next_rect = center.copy()
+            stay = pygame.Rect(0, 0, 160, 44)
+            stay.center = (VIEW_RECT.centerx - 90, VIEW_RECT.centery + 124)
+            next_rect = stay.copy()
             next_rect.centerx = VIEW_RECT.centerx + 90
             self.win_buttons = [
-                Button(center, "Ở lại", self.close_win),
+                Button(stay, "Ở lại", self.close_win),
                 Button(next_rect, "Màn tiếp →", self.next_level, (46, 140, 86)),
             ]
         else:
             self.log("[Lỗi] " + result.message, COLOR_BAD)
+            self.sound.play("fail")
 
     def close_win(self) -> None:
         self.show_win = False
@@ -583,6 +704,9 @@ class App:
         pygame.quit()
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if self.scene == "store":
+            self.store.handle_event(event)
+            return
         if self.scene == "menu":
             for button in [*self.menu_buttons, *self.menu_tool_buttons]:
                 if button.handle_event(event):
@@ -621,6 +745,8 @@ class App:
         self.editor.handle_event(event)
 
     def update(self, delta_seconds: float) -> None:
+        self.confetti.update(delta_seconds)
+        self.win_time += delta_seconds
         if self.toast is not None:
             text, remaining = self.toast
             self.toast = (text, remaining - delta_seconds) if remaining > delta_seconds else None
@@ -643,7 +769,9 @@ class App:
         self.screen.blit(shade, (0, 0))
 
     def draw(self) -> None:
-        if self.scene == "menu":
+        if self.scene == "store":
+            self.store.draw(self.screen)
+        elif self.scene == "menu":
             self.draw_menu()
         else:
             self.draw_play()
@@ -657,12 +785,19 @@ class App:
             text_left = MENU_LEFT + self.logo.get_width() + 6
         title = self.font_title.render("OneSpace CodeQuest · Python", True, COLOR_ACCENT)
         self.screen.blit(title, (text_left, 34))
-        subtitle = self.font.render(
-            "Viết code Python để đưa nhân vật vượt màn - 5 giai đoạn từ nền tảng tới nâng cao. Cho học sinh THCS - THPT.",
-            True,
-            COLOR_MUTED,
-        )
-        self.screen.blit(subtitle, (text_left + 2, 80))
+        stars = total_stars(self.progress)
+        rank = rank_for(stars)[0]
+        draw_star(self.screen, (text_left + 12, 92), 11, True)
+        stats = self.font.render(f"{stars}/{3 * len(self.levels)} sao", True, COLOR_TEXT)
+        self.screen.blit(stats, (text_left + 30, 80))
+        coin_x = text_left + 50 + stats.get_width()
+        draw_coin(self.screen, (coin_x, 92), 10)
+        coins = self.font.render(f"{self.progress.coins} xu", True, COLOR_TEXT)
+        self.screen.blit(coins, (coin_x + 16, 80))
+        rank_text = self.font.render(f"Cấp bậc: {rank}", True, COLOR_ACCENT)
+        self.screen.blit(rank_text, (coin_x + 40 + coins.get_width(), 80))
+        for button in self.menu_tool_buttons:
+            button.draw(self.screen, self.font_small)
 
         for button in self.menu_buttons[: len(STAGES)]:
             button.draw(self.screen, self.font)
@@ -692,8 +827,6 @@ class App:
 
         for button in self.menu_buttons[len(STAGES):]:
             button.draw(self.screen, self.font)
-        for button in self.menu_tool_buttons:
-            button.draw(self.screen, self.font_small)
         self.draw_toast()
 
     def draw_toast(self) -> None:
@@ -730,8 +863,10 @@ class App:
         draw_panel(self.screen, VIEW_RECT, alpha=150)
         self.draw_map()
         self.draw_hearts()
+        self.draw_star_goals()
         if self.show_win:
             self.draw_win()
+        self.confetti.draw(self.screen, VIEW_RECT)
 
         draw_panel(self.screen, CONSOLE_RECT)
         self.draw_console()
@@ -805,7 +940,7 @@ class App:
             image.set_alpha(int(255 * remaining / 0.5))
             self._blit_on_tile(image, x, y, flip=kind != "duck")
 
-        hero_frames = self.assets.hero[playback.hero_state]
+        hero_frames = self.assets.hero_skin(skin_number(self.progress))[playback.hero_state]
         hero_image = self._frame(hero_frames, 16, playback.hero_state_time)
         if playback.dead:
             hero_image = hero_image.copy()
@@ -843,27 +978,73 @@ class App:
             self.screen.blit(rendered, (rect.x + 10, rect.y + 6 + index * 20))
 
     def draw_hearts(self) -> None:
-        for index in range(MAX_HERO_HP):
+        for index in range(self.playback.max_hp):
             color = COLOR_BAD if index < self.playback.hp else (70, 70, 90)
             heart = self.font_bold.render("♥", True, color)
             self.screen.blit(heart, (VIEW_RECT.x + 12 + index * 24, VIEW_RECT.y + 8))
+        if self.playback.shield:
+            draw_shield(self.screen, (VIEW_RECT.x + 24 + self.playback.max_hp * 24, VIEW_RECT.y + 20), 8)
         collected = len(self.playback.terrain_world.gems) - len(self.playback.gems)
         total = len(self.playback.terrain_world.gems)
         if total:
             gem_text = self.font_bold.render(f"Ngọc: {collected}/{total}", True, COLOR_ACCENT)
             self.screen.blit(gem_text, (VIEW_RECT.right - gem_text.get_width() - 14, VIEW_RECT.y + 8))
 
+    def draw_star_goals(self) -> None:
+        best = self.progress.stars.get(self.level.id, 0)
+        goals = star_goals(self.level.id)
+        pieces = [(self.font_small.render(text, True, COLOR_TEXT if index < best else COLOR_MUTED), index < best)
+                  for index, text in enumerate(goals)]
+        total_width = sum(image.get_width() + 26 for image, _ in pieces) + 12 * (len(pieces) - 1)
+        x = VIEW_RECT.centerx - total_width // 2
+        for image, achieved in pieces:
+            draw_star(self.screen, (x + 9, VIEW_RECT.y + 20), 8, achieved)
+            self.screen.blit(image, (x + 22, VIEW_RECT.y + 11))
+            x += image.get_width() + 38
+
     def draw_win(self) -> None:
+        summary = self.win_summary
         overlay = pygame.Surface(VIEW_RECT.size, pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 140))
+        overlay.fill((0, 0, 0, 150))
         self.screen.blit(overlay, VIEW_RECT.topleft)
-        panel = pygame.Rect(0, 0, 420, 190)
+        panel = pygame.Rect(0, 0, 470, 330)
         panel.center = VIEW_RECT.center
         draw_panel(self.screen, panel, alpha=245)
         title = self.font_title.render("Hoàn thành!", True, COLOR_GOOD)
-        self.screen.blit(title, title.get_rect(center=(panel.centerx, panel.y + 40)))
-        sub = self.font.render(f"Bạn đã vượt qua màn {self.level.id}.", True, COLOR_TEXT)
-        self.screen.blit(sub, sub.get_rect(center=(panel.centerx, panel.y + 80)))
+        self.screen.blit(title, title.get_rect(center=(panel.centerx, panel.y + 32)))
+        if summary is None:
+            for button in self.win_buttons:
+                button.draw(self.screen, self.font)
+            return
+
+        for index, achieved in enumerate(summary.stars):
+            appear = min(1.0, max(0.0, (self.win_time - 0.25 * index) * 4))
+            radius = 24 * (appear * (1.25 - 0.25 * appear)) if achieved else 22
+            if achieved and appear <= 0:
+                radius = 0
+            center = (panel.centerx + (index - 1) * 62, panel.y + 84)
+            if radius > 0:
+                draw_star(self.screen, center, radius, achieved)
+
+        y = panel.y + 122
+        for achieved, text in zip(summary.stars, star_goals(self.level.id), strict=True):
+            draw_star(self.screen, (panel.x + 46, y + 10), 8, achieved)
+            color = COLOR_TEXT if achieved else COLOR_MUTED
+            self.screen.blit(self.font_small.render(text, True, color), (panel.x + 62, y))
+            y += 24
+
+        draw_coin(self.screen, (panel.x + 48, y + 16), 11)
+        coin_text = f"+{summary.coins} xu" if summary.coins else "Không có xu mới (đã nhận ở lần trước)"
+        self.screen.blit(self.font_bold.render(coin_text, True, COLOR_ACCENT), (panel.x + 66, y + 4))
+        y += 34
+        if summary.chest_world is not None:
+            world = WORLDS[summary.chest_world - 1]
+            text = f"Mở rương World {world.number} · {world.title}: huy hiệu + {WORLD_CHEST_COINS} xu!"
+            self.screen.blit(self.font_small.render(text, True, COLOR_GOOD), (panel.x + 30, y))
+            y += 22
+        if summary.rank_up:
+            text = f"Lên cấp bậc mới: {summary.new_rank}!"
+            self.screen.blit(self.font_small.render(text, True, COLOR_INFO), (panel.x + 30, y))
         for button in self.win_buttons:
             button.draw(self.screen, self.font)
 

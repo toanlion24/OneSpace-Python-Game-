@@ -18,6 +18,12 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
   Ctrl+Space để mở lại); bôi đen bằng chuột hoặc Shift + mũi tên; Ctrl+A / C / X / V / Z;
   Tab thụt lề cả đoạn đã chọn.
 - **Không mất bài**: code và các màn đã qua được lưu tự động, cài lại game vẫn còn.
+- **Chơi như game thật**:
+  - Mỗi màn có **3 sao**: qua màn · không mất máu · code gọn (không vượt quá số dòng cho phép).
+  - Sao mới đạt được đổi ra **xu**; tổng sao quyết định **cấp bậc** (Tân binh → Huyền thoại OneSpace).
+  - Qua đủ 5 màn một World thì **mở rương báu**: nhận **huy hiệu chiến thắng** + xu thưởng.
+  - **Cửa hàng**: dùng xu mua nhân vật (Rô-bốt Vàng, Cáo Lửa), Tim thêm (+1 máu), Khiên gỗ (đỡ đòn đầu tiên).
+  - Hiệu ứng pháo giấy, âm thanh (bật/tắt được).
 
 ## Tải game (Windows)
 
@@ -108,7 +114,12 @@ codequest/theory.py       Lý thuyết từng màn
 codequest/game.py         Giao diện: menu theo giai đoạn, bản đồ, phát lại hoạt ảnh, bảng tin
 codequest/editor.py       Trình soạn code (tô màu, tự thụt lề, bôi đen, copy/paste, undo, Telex)
 codequest/completion.py   Gợi ý code khi gõ
-codequest/progress.py     Lưu / sao lưu / khôi phục tiến độ
+codequest/progress.py     Lưu / sao lưu / khôi phục tiến độ (cả sao, xu, đồ đã mua)
+codequest/rewards.py      Sao, xu, cấp bậc, rương báu, cửa hàng
+codequest/par.py          Số dòng code tối đa cho sao "code gọn" (sinh bởi make_par.py)
+codequest/store_view.py   Màn Bộ sưu tập & Cửa hàng
+codequest/hud.py          Vẽ sao, xu, huy hiệu, pháo giấy
+codequest/sound.py        Âm thanh tạo bằng code
 codequest/telex.py        Bộ gõ tiếng Việt Telex
 codequest/theory_view.py  Khung lý thuyết cuộn được
 codequest/display.py      Co giãn khung hình theo cửa sổ

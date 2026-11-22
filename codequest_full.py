@@ -11,7 +11,9 @@ import ast
 import ctypes
 import json
 import keyword
+import math
 import os
+import random
 import re
 import sys
 import time
@@ -21,8 +23,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pygame
 
 # ======================================================================
@@ -298,12 +301,31 @@ class RunResult:
     won: bool
     message: str
     error_line: int | None = None
+    damage_taken: int = 0
+    code_lines: int = 0
+
+
+def upgrades_apply(level: Level) -> bool:
+    """Shop upgrades (extra hearts, shield) are off in levels that are about healing."""
+    return not level.need_full_hp and level.start_hp == MAX_HERO_HP
+
+
+def hero_hp_limits(level: Level, bonus_hp: int = 0) -> tuple[int, int]:
+    """(starting hp, maximum hp) for a level, including shop upgrades when they apply."""
+    if not upgrades_apply(level):
+        return level.start_hp, MAX_HERO_HP
+    return MAX_HERO_HP + bonus_hp, MAX_HERO_HP + bonus_hp
+
+
+def count_code_lines(source: str) -> int:
+    """Lines that contain code (blank lines and comment-only lines do not count)."""
+    return sum(1 for line in source.split("\n") if line.strip() and not line.strip().startswith("#"))
 
 
 class World:
     """Rules and state of one level."""
 
-    def __init__(self, level: Level) -> None:
+    def __init__(self, level: Level, bonus_hp: int = 0, shield: bool = False) -> None:
         self.level = level
         self.rows = level.rows
         self.height = len(level.rows)
@@ -319,7 +341,9 @@ class World:
 
         self.hero_x, self.hero_y = self.hero_start
         self.facing = "right"
-        self.hp = level.start_hp
+        self.hp, self.max_hp = hero_hp_limits(level, bonus_hp)
+        self.shield = shield and upgrades_apply(level)
+        self.damage_taken = 0
         self.gems_collected = 0
         self.events: list[dict[str, Any]] = []
         self.messages: list[str] = []
@@ -386,6 +410,11 @@ class World:
         return direction
 
     def hurt(self, reason: str) -> None:
+        if self.shield:
+            self.shield = False
+            self.emit("shield", text=f"Khiên đỡ đòn! ({reason})")
+            return
+        self.damage_taken += 1
         self.hp -= 1
         self.emit("hurt", hp=self.hp, text=reason)
         if self.hp <= 0:
@@ -512,7 +541,7 @@ class World:
         if isinstance(power, bool) or not isinstance(power, int):
             raise TypeError("Vật phẩm cần có thuộc tính power là số nguyên (ví dụ self.power = 2).")
         self.count_action()
-        healed = max(0, min(MAX_HERO_HP, self.hp + power) - self.hp)
+        healed = max(0, min(self.max_hp, self.hp + power) - self.hp)
         self.hp += healed
         self.emit("heal", hp=self.hp, amount=healed)
 
@@ -993,15 +1022,16 @@ def explain_syntax_error(exc: SyntaxError) -> str:
     return f"Dòng {line}: Sai cú pháp ({exc.msg}). Kiểm tra dấu ngoặc, dấu hai chấm, dấu nháy."
 
 
-def run_code(level: Level, source: str) -> RunResult:
+def run_code(level: Level, source: str, bonus_hp: int = 0, shield: bool = False) -> RunResult:
     """Run the player's code against a fresh world and judge the outcome."""
-    world = World(level)
+    world = World(level, bonus_hp, shield)
+    lines = count_code_lines(source)
 
     try:
         tree = ast.parse(source, CODE_FILENAME)
         code = compile(tree, CODE_FILENAME, "exec")
     except SyntaxError as exc:
-        return RunResult([], False, explain_syntax_error(exc), exc.lineno)
+        return RunResult([], False, explain_syntax_error(exc), exc.lineno, 0, lines)
 
     namespace: dict[str, Any] = {
         "__builtins__": _safe_builtins(world),
@@ -1044,12 +1074,12 @@ def run_code(level: Level, source: str) -> RunResult:
         sys.settrace(old_trace)
 
     if error_message is not None:
-        return RunResult(world.events, False, error_message, error_line)
+        return RunResult(world.events, False, error_message, error_line, world.damage_taken, lines)
 
     problem = _judge(world, tree, level)
     if problem:
-        return RunResult(world.events, False, problem)
-    return RunResult(world.events, True, "Hoàn thành màn chơi!")
+        return RunResult(world.events, False, problem, None, world.damage_taken, lines)
+    return RunResult(world.events, True, "Hoàn thành màn chơi!", None, world.damage_taken, lines)
 
 
 def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
@@ -1057,8 +1087,8 @@ def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
         return "Hero chưa tới cổng (cúp vàng). Hãy kiểm tra lại các bước đi."
     if world.gems:
         return f"Còn {len(world.gems)} viên ngọc chưa nhặt."
-    if level.need_full_hp and world.hp < MAX_HERO_HP:
-        return f"Hero mới có {world.hp}/{MAX_HERO_HP} máu - cần hồi đầy máu trước khi tới cúp."
+    if level.need_full_hp and world.hp < world.max_hp:
+        return f"Hero mới có {world.hp}/{world.max_hp} máu - cần hồi đầy máu trước khi tới cúp."
     if level.kill_all and world.enemies:
         return f"Còn {len(world.enemies)} quái chưa bị hạ."
     if level.say_contains is not None:
@@ -1071,6 +1101,129 @@ def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
     if missing:
         return "Màn này yêu cầu dùng: " + ", ".join(missing) + "."
     return None
+
+
+# ======================================================================
+# par.py
+# ======================================================================
+
+PAR: dict[str, int] = {
+    "1-1": 1,
+    "1-2": 3,
+    "1-3": 2,
+    "1-4": 7,
+    "1-5": 4,
+    "2-1": 2,
+    "2-2": 5,
+    "2-3": 4,
+    "2-4": 2,
+    "2-5": 4,
+    "3-1": 4,
+    "3-2": 6,
+    "3-3": 5,
+    "3-4": 6,
+    "3-5": 4,
+    "4-1": 2,
+    "4-2": 3,
+    "4-3": 3,
+    "4-4": 3,
+    "4-5": 4,
+    "5-1": 3,
+    "5-2": 4,
+    "5-3": 1,
+    "5-4": 3,
+    "5-5": 4,
+    "6-1": 10,
+    "6-2": 4,
+    "6-3": 5,
+    "6-4": 5,
+    "6-5": 5,
+    "7-1": 4,
+    "7-2": 3,
+    "7-3": 3,
+    "7-4": 4,
+    "7-5": 4,
+    "8-1": 4,
+    "8-2": 4,
+    "8-3": 3,
+    "8-4": 5,
+    "8-5": 2,
+    "9-1": 6,
+    "9-2": 5,
+    "9-3": 6,
+    "9-4": 7,
+    "9-5": 3,
+    "10-1": 4,
+    "10-2": 5,
+    "10-3": 4,
+    "10-4": 5,
+    "10-5": 6,
+    "11-1": 6,
+    "11-2": 4,
+    "11-3": 8,
+    "11-4": 4,
+    "11-5": 5,
+    "12-1": 6,
+    "12-2": 5,
+    "12-3": 5,
+    "12-4": 6,
+    "12-5": 4,
+    "13-1": 6,
+    "13-2": 9,
+    "13-3": 6,
+    "13-4": 5,
+    "13-5": 9,
+    "14-1": 7,
+    "14-2": 7,
+    "14-3": 7,
+    "14-4": 6,
+    "14-5": 5,
+    "15-1": 6,
+    "15-2": 4,
+    "15-3": 6,
+    "15-4": 5,
+    "15-5": 6,
+    "16-1": 9,
+    "16-2": 12,
+    "16-3": 10,
+    "16-4": 9,
+    "16-5": 9,
+    "17-1": 5,
+    "17-2": 11,
+    "17-3": 6,
+    "17-4": 11,
+    "17-5": 10,
+    "18-1": 18,
+    "18-2": 11,
+    "18-3": 5,
+    "18-4": 9,
+    "18-5": 10,
+    "19-1": 6,
+    "19-2": 4,
+    "19-3": 4,
+    "19-4": 9,
+    "19-5": 5,
+    "20-1": 5,
+    "20-2": 6,
+    "20-3": 5,
+    "20-4": 6,
+    "20-5": 6,
+    "21-1": 9,
+    "21-2": 11,
+    "21-3": 8,
+    "21-4": 16,
+    "21-5": 12,
+    "22-1": 5,
+    "22-2": 8,
+    "22-3": 5,
+    "22-4": 7,
+    "22-5": 6,
+    "23-1": 3,
+    "23-2": 6,
+    "23-3": 4,
+    "23-4": 3,
+    "23-5": 4,
+}
 
 
 # ======================================================================
@@ -5948,6 +6101,162 @@ THEORY.update(PRACTICE_THEORY)
 
 
 # ======================================================================
+# rewards.py
+# ======================================================================
+
+STAR_COINS = 10
+WORLD_CHEST_COINS = 50
+DEFAULT_SKIN = "skin1"
+
+RANKS: list[tuple[int, str]] = [
+    (0, "Tân binh"),
+    (15, "Học việc"),
+    (45, "Hiệp sĩ code"),
+    (90, "Chiến binh thuật toán"),
+    (160, "Pháp sư Python"),
+    (260, "Huyền thoại OneSpace"),
+]
+
+
+@dataclass(frozen=True)
+class ShopItem:
+    id: str
+    name: str
+    description: str
+    price: int
+    kind: str  # "skin", "heart", "shield"
+    skin_number: int = 1
+    requires: str | None = None
+
+
+SHOP_ITEMS: list[ShopItem] = [
+    ShopItem("skin1", "Bạn Nhỏ", "Nhân vật mặc định.", 0, "skin", skin_number=1),
+    ShopItem("skin2", "Rô-bốt Vàng", "Nhân vật rô-bốt tinh nghịch.", 120, "skin", skin_number=2),
+    ShopItem("skin3", "Cáo Lửa", "Nhân vật cáo nhanh nhẹn.", 220, "skin", skin_number=3),
+    ShopItem("heart1", "Tim thêm I", "+1 máu tối đa ở các màn thường.", 150, "heart"),
+    ShopItem("heart2", "Tim thêm II", "+1 máu tối đa nữa (cần Tim thêm I).", 300, "heart", requires="heart1"),
+    ShopItem("shield", "Khiên gỗ", "Đỡ giúp đòn đầu tiên trong mỗi màn thường.", 250, "shield"),
+]
+ITEMS_BY_ID: dict[str, ShopItem] = {item.id: item for item in SHOP_ITEMS}
+
+
+@dataclass
+class RewardSummary:
+    stars: tuple[bool, bool, bool]
+    new_stars: int
+    coins: int
+    chest_world: int | None = None
+    old_rank: str = ""
+    new_rank: str = ""
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def rank_up(self) -> bool:
+        return self.old_rank != self.new_rank
+
+
+def par_for(level_id: str) -> int:
+    return PAR.get(level_id, 99)
+
+
+def star_flags(result: RunResult, level_id: str) -> tuple[bool, bool, bool]:
+    won = result.won
+    return (won, won and result.damage_taken == 0, won and result.code_lines <= par_for(level_id))
+
+
+def star_goals(level_id: str) -> list[str]:
+    return ["Qua màn", "Không mất máu", f"Code gọn: tối đa {par_for(level_id)} dòng"]
+
+
+def rank_for(total_stars: int) -> tuple[str, int | None]:
+    """(rank name, stars needed for the next rank or None at the top)."""
+    name = RANKS[0][1]
+    next_threshold: int | None = None
+    for threshold, rank_name in RANKS:
+        if total_stars >= threshold:
+            name = rank_name
+        elif next_threshold is None:
+            next_threshold = threshold
+    return name, next_threshold
+
+
+def total_stars(progress: object) -> int:
+    return sum(getattr(progress, "stars", {}).values())
+
+
+def apply_win(progress: object, level: Level, world_levels: list[Level], world_number: int,
+              flags: tuple[bool, bool, bool]) -> RewardSummary:
+    """Record a win: keep the best stars, pay coins for NEW stars and open the world chest once."""
+    stars: dict[str, int] = progress.stars  # type: ignore[attr-defined]
+    earned = sum(flags)
+    previous = stars.get(level.id, 0)
+    old_rank = rank_for(total_stars(progress))[0]
+    new_stars = max(0, earned - previous)
+    stars[level.id] = max(previous, earned)
+    progress.completed.add(level.id)  # type: ignore[attr-defined]
+    coins = new_stars * STAR_COINS
+
+    chest_world = None
+    completed = progress.completed  # type: ignore[attr-defined]
+    chests: set[int] = progress.chests  # type: ignore[attr-defined]
+    if world_number not in chests and all(lv.id in completed for lv in world_levels):
+        chests.add(world_number)
+        coins += WORLD_CHEST_COINS
+        chest_world = world_number
+
+    progress.coins += coins  # type: ignore[attr-defined]
+    new_rank = rank_for(total_stars(progress))[0]
+    return RewardSummary(flags, new_stars, coins, chest_world, old_rank, new_rank)
+
+
+# ---------------------------------------------------------------- shop
+def bonus_hp(progress: object) -> int:
+    owned: set[str] = progress.owned  # type: ignore[attr-defined]
+    return sum(1 for item_id in owned if ITEMS_BY_ID.get(item_id, SHOP_ITEMS[0]).kind == "heart")
+
+
+def has_shield(progress: object) -> bool:
+    return "shield" in progress.owned  # type: ignore[attr-defined]
+
+
+def can_buy(progress: object, item: ShopItem) -> tuple[bool, str]:
+    owned: set[str] = progress.owned  # type: ignore[attr-defined]
+    if item.id in owned or item.price == 0:
+        return False, "Đã có"
+    if item.requires and item.requires not in owned:
+        return False, f"Cần {ITEMS_BY_ID[item.requires].name}"
+    if progress.coins < item.price:  # type: ignore[attr-defined]
+        return False, f"Thiếu {item.price - progress.coins} xu"  # type: ignore[attr-defined]
+    return True, ""
+
+
+def buy(progress: object, item: ShopItem) -> bool:
+    ok, _ = can_buy(progress, item)
+    if not ok:
+        return False
+    progress.coins -= item.price  # type: ignore[attr-defined]
+    progress.owned.add(item.id)  # type: ignore[attr-defined]
+    if item.kind == "skin":
+        progress.skin = item.id  # type: ignore[attr-defined]
+    return True
+
+
+def equip_skin(progress: object, item_id: str) -> bool:
+    item = ITEMS_BY_ID.get(item_id)
+    if item is None or item.kind != "skin":
+        return False
+    if item.price and item_id not in progress.owned:  # type: ignore[attr-defined]
+        return False
+    progress.skin = item_id  # type: ignore[attr-defined]
+    return True
+
+
+def skin_number(progress: object) -> int:
+    item = ITEMS_BY_ID.get(getattr(progress, "skin", DEFAULT_SKIN), SHOP_ITEMS[0])
+    return item.skin_number
+
+
+# ======================================================================
 # display.py
 # ======================================================================
 
@@ -7259,14 +7568,9 @@ class Assets:
         self.door_locked = self._tile(tileset, 13, 5)
         self.door_jammed = self._tile(tileset, 6, 8)
 
-        hero_dir = f"1 Main Characters/{hero_skin}"
         hero_scale = TILE / 32 * 1.25
-        self.hero = {
-            "idle": strip(f"{hero_dir}/Idle.png", 32, hero_scale),
-            "run": strip(f"{hero_dir}/Run.png", 32, hero_scale),
-            "hit": strip(f"{hero_dir}/Hit.png", 32, hero_scale),
-            "jump": strip(f"{hero_dir}/Jump.png", 32, hero_scale),
-        }
+        self._hero_skins: dict[int, dict[str, list[pygame.Surface]]] = {}
+        self.hero = self.hero_skin(hero_skin)
         self.appearing = strip("1 Main Characters/Appearing.png", 96, hero_scale)
 
         self.enemies: dict[str, dict[str, list[pygame.Surface]]] = {}
@@ -7285,6 +7589,19 @@ class Assets:
             for index in range(1, 7)
         }
 
+    def hero_skin(self, number: int) -> dict[str, list[pygame.Surface]]:
+        """Animation frames for character 1, 2 or 3 (loaded once, then cached)."""
+        if number not in self._hero_skins:
+            hero_dir = f"1 Main Characters/{number}"
+            scale = TILE / 32 * 1.25
+            self._hero_skins[number] = {
+                "idle": strip(f"{hero_dir}/Idle.png", 32, scale),
+                "run": strip(f"{hero_dir}/Run.png", 32, scale),
+                "hit": strip(f"{hero_dir}/Hit.png", 32, scale),
+                "jump": strip(f"{hero_dir}/Jump.png", 32, scale),
+            }
+        return self._hero_skins[number]
+
     @staticmethod
     def _tile(tileset: pygame.Surface, column: int, row: int) -> pygame.Surface:
         tile = tileset.subsurface((column * 16, row * 16, 16, 16))
@@ -7292,10 +7609,198 @@ class Assets:
 
 
 # ======================================================================
+# hud.py
+# ======================================================================
+
+GOLD = (255, 205, 60)
+GOLD_DARK = (150, 110, 20)
+EMPTY_STAR = (70, 74, 96)
+STAGE_COLORS: dict[int, tuple[int, int, int]] = {
+    1: (80, 200, 120),
+    2: (90, 160, 240),
+    3: (240, 150, 70),
+    4: (200, 110, 230),
+    5: (240, 90, 110),
+}
+
+
+def star_points(center: tuple[float, float], radius: float) -> list[tuple[float, float]]:
+    points = []
+    for index in range(10):
+        angle = math.pi / 2 + index * math.pi / 5
+        distance = radius if index % 2 == 0 else radius * 0.45
+        points.append((center[0] + distance * math.cos(angle), center[1] - distance * math.sin(angle)))
+    return points
+
+
+def draw_star(surface: pygame.Surface, center: tuple[float, float], radius: float, filled: bool) -> None:
+    points = star_points(center, radius)
+    pygame.draw.polygon(surface, GOLD if filled else EMPTY_STAR, points)
+    pygame.draw.polygon(surface, GOLD_DARK if filled else (50, 54, 72), points, width=max(1, int(radius // 6)))
+
+
+def draw_star_row(surface: pygame.Surface, center: tuple[float, float], radius: float, count: int, total: int = 3) -> None:
+    spacing = radius * 2.3
+    start_x = center[0] - spacing * (total - 1) / 2
+    for index in range(total):
+        draw_star(surface, (start_x + index * spacing, center[1]), radius, index < count)
+
+
+def draw_coin(surface: pygame.Surface, center: tuple[int, int], radius: int) -> None:
+    pygame.draw.circle(surface, GOLD_DARK, center, radius)
+    pygame.draw.circle(surface, GOLD, center, radius - max(1, radius // 5))
+    pygame.draw.circle(surface, (255, 235, 140), (center[0] - radius // 3, center[1] - radius // 3), max(1, radius // 4))
+
+
+def draw_shield(surface: pygame.Surface, center: tuple[int, int], size: int, active: bool = True) -> None:
+    x, y = center
+    points = [
+        (x - size, y - size), (x + size, y - size), (x + size, y),
+        (x, y + int(size * 1.3)), (x - size, y),
+    ]
+    pygame.draw.polygon(surface, (120, 180, 240) if active else (70, 74, 96), points)
+    pygame.draw.polygon(surface, (40, 70, 120), points, width=2)
+
+
+def draw_heart(surface: pygame.Surface, center: tuple[int, int], size: int, color: tuple[int, int, int]) -> None:
+    x, y = center
+    radius = size // 2
+    pygame.draw.circle(surface, color, (x - radius, y - radius // 2), radius)
+    pygame.draw.circle(surface, color, (x + radius, y - radius // 2), radius)
+    pygame.draw.polygon(surface, color, [(x - size, y - radius // 3), (x + size, y - radius // 3), (x, y + size)])
+
+
+def draw_medal(
+    surface: pygame.Surface,
+    center: tuple[int, int],
+    radius: int,
+    label: str,
+    font: pygame.font.Font,
+    color: tuple[int, int, int],
+    earned: bool,
+) -> None:
+    x, y = center
+    ribbon = (200, 60, 70) if earned else (60, 62, 80)
+    pygame.draw.polygon(surface, ribbon, [(x - radius // 2, y - radius - 14), (x, y - radius + 4), (x - radius, y - radius - 2)])
+    pygame.draw.polygon(surface, ribbon, [(x + radius // 2, y - radius - 14), (x, y - radius + 4), (x + radius, y - radius - 2)])
+    pygame.draw.circle(surface, GOLD_DARK if earned else (50, 52, 68), center, radius)
+    pygame.draw.circle(surface, color if earned else (64, 68, 88), center, radius - 4)
+    text = font.render(label, True, (255, 255, 255) if earned else (120, 124, 146))
+    surface.blit(text, text.get_rect(center=center))
+
+
+class Confetti:
+    """Short burst of falling paper for wins."""
+
+    COLORS = ((255, 205, 60), (90, 220, 120), (120, 180, 255), (255, 110, 150), (200, 140, 255))
+
+    def __init__(self) -> None:
+        self.pieces: list[list[float]] = []
+
+    def burst(self, area: pygame.Rect, count: int = 90) -> None:
+        for _ in range(count):
+            self.pieces.append([
+                random.uniform(area.left, area.right),
+                random.uniform(area.top - 40, area.top + 20),
+                random.uniform(-60, 60),
+                random.uniform(80, 220),
+                random.uniform(0, 360),
+                random.uniform(-400, 400),
+                random.randrange(len(self.COLORS)),
+                random.uniform(2.0, 3.2),
+            ])
+
+    def update(self, delta_seconds: float) -> None:
+        for piece in self.pieces:
+            piece[0] += piece[2] * delta_seconds
+            piece[1] += piece[3] * delta_seconds
+            piece[4] += piece[5] * delta_seconds
+            piece[7] -= delta_seconds
+        self.pieces = [piece for piece in self.pieces if piece[7] > 0]
+
+    def draw(self, surface: pygame.Surface, clip: pygame.Rect) -> None:
+        previous = surface.get_clip()
+        surface.set_clip(clip)
+        for x, y, _, _, angle, _, color_index, _ in self.pieces:
+            width = 6 * abs(math.cos(math.radians(angle))) + 1
+            pygame.draw.rect(surface, self.COLORS[int(color_index)], (x, y, width, 9))
+        surface.set_clip(previous)
+
+
+# ======================================================================
+# sound.py
+# ======================================================================
+
+SAMPLE_RATE = 22050
+
+
+def _tone(frequencies: list[tuple[float, float]], volume: float = 0.35, wave: str = "square") -> np.ndarray:
+    """Concatenate (frequency Hz, seconds) notes into one sound with a short fade on each note."""
+    parts = []
+    for frequency, seconds in frequencies:
+        count = int(SAMPLE_RATE * seconds)
+        time_axis = np.arange(count) / SAMPLE_RATE
+        if frequency <= 0:
+            samples = np.random.uniform(-1, 1, count)
+        elif wave == "square":
+            samples = np.sign(np.sin(2 * np.pi * frequency * time_axis))
+        else:
+            samples = np.sin(2 * np.pi * frequency * time_axis)
+        envelope = np.minimum(1.0, np.linspace(1.0, 0.0, count) * 4)
+        parts.append(samples * envelope)
+    return (np.concatenate(parts) * volume * 32767).astype(np.int16)
+
+
+SOUND_RECIPES: dict[str, np.ndarray] = {}
+
+
+def _recipes() -> dict[str, np.ndarray]:
+    if not SOUND_RECIPES:
+        SOUND_RECIPES.update({
+            "step": _tone([(220, 0.03)], volume=0.08),
+            "gem": _tone([(988, 0.06), (1319, 0.12)], volume=0.25),
+            "hit": _tone([(0, 0.08)], volume=0.25),
+            "hurt": _tone([(196, 0.08), (147, 0.14)], volume=0.3),
+            "door": _tone([(330, 0.06), (440, 0.06), (554, 0.1)], volume=0.25),
+            "shield": _tone([(660, 0.05), (880, 0.1)], volume=0.25, wave="sine"),
+            "win": _tone([(523, 0.1), (659, 0.1), (784, 0.1), (1047, 0.25)], volume=0.3),
+            "fail": _tone([(392, 0.12), (330, 0.12), (262, 0.25)], volume=0.25),
+            "coin": _tone([(1319, 0.05), (1760, 0.1)], volume=0.2),
+            "chest": _tone([(523, 0.08), (659, 0.08), (784, 0.08), (1047, 0.08), (1319, 0.3)], volume=0.3),
+            "click": _tone([(660, 0.02)], volume=0.1),
+        })
+    return SOUND_RECIPES
+
+
+class SoundBoard:
+    def __init__(self, muted: bool = False) -> None:
+        self.muted = muted
+        self.sounds: dict[str, pygame.mixer.Sound] = {}
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=SAMPLE_RATE, size=-16, channels=2)
+            _, _, channels = pygame.mixer.get_init()
+            for name, mono in _recipes().items():
+                data = np.column_stack([mono] * channels) if channels > 1 else mono
+                self.sounds[name] = pygame.sndarray.make_sound(np.ascontiguousarray(data))
+        except (pygame.error, TypeError, ValueError):
+            self.sounds = {}
+
+    def play(self, name: str) -> None:
+        if self.muted:
+            return
+        sound = self.sounds.get(name)
+        if sound is not None:
+            sound.play()
+
+
+# ======================================================================
 # progress.py
 # ======================================================================
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+# Xu thưởng cho mỗi sao (giữ giống rewards.STAR_COINS).
+STAR_COINS = 10
 BACKUP_NAME = "tien-do.json"
 
 
@@ -7322,6 +7827,12 @@ class Progress:
         self.backup_dir = backup_dir
         self.completed: set[str] = set()
         self.code: dict[str, str] = {}
+        self.stars: dict[str, int] = {}
+        self.coins = 0
+        self.owned: set[str] = set()
+        self.skin = "skin1"
+        self.chests: set[int] = set()
+        self.muted = False
         self.restored_from_backup = False
         self._load()
 
@@ -7347,7 +7858,26 @@ class Progress:
         for level_id, text in dict(data.get("code", {})).items():
             if isinstance(text, str) and level_id not in self.code:
                 self.code[str(level_id)] = text
+        for level_id, count in dict(data.get("stars", {})).items():
+            if isinstance(count, int):
+                self.stars[str(level_id)] = max(self.stars.get(str(level_id), 0), min(3, count))
+        if isinstance(data.get("coins"), int):
+            self.coins = max(self.coins, data["coins"])
+        self.owned |= {str(item) for item in data.get("owned", [])}
+        self.chests |= {int(world) for world in data.get("chests", []) if str(world).isdigit()}
+        if self.skin == "skin1" and isinstance(data.get("skin"), str):
+            self.skin = data["skin"]
+        if isinstance(data.get("muted"), bool):
+            self.muted = data["muted"]
+        self._migrate_old_wins()
         return len(self.completed) - before
+
+    def _migrate_old_wins(self) -> None:
+        """Levels finished in versions before stars existed count as 1 star (and its coins)."""
+        for level_id in self.completed:
+            if level_id not in self.stars:
+                self.stars[level_id] = 1
+                self.coins += STAR_COINS
 
     # ------------------------------------------------------------ saving
     def to_json(self) -> str:
@@ -7357,6 +7887,12 @@ class Progress:
             "saved_at": datetime.now().isoformat(timespec="seconds"),
             "completed": sorted(self.completed),
             "code": self.code,
+            "stars": self.stars,
+            "coins": self.coins,
+            "owned": sorted(self.owned),
+            "skin": self.skin,
+            "chests": sorted(self.chests),
+            "muted": self.muted,
         }
         return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -7391,6 +7927,139 @@ class Progress:
         added = self._merge(data)
         self.save()
         return added
+
+
+# ======================================================================
+# store_view.py
+# ======================================================================
+
+if TYPE_CHECKING:
+    from .game import App
+
+STORE_COLOR_TEXT = (230, 232, 240)
+STORE_COLOR_MUTED = (150, 156, 180)
+STORE_COLOR_ACCENT = (255, 196, 64)
+STORE_COLOR_GOOD = (90, 220, 120)
+PANEL = pygame.Rect(40, 20, 1200, 690)
+SHOP_X = 700
+ITEM_HEIGHT = 92
+
+
+class StoreView:
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.buttons: list[Any] = []
+
+    # ------------------------------------------------------------ actions
+    def build(self) -> None:
+        make_button = self.app.make_button
+        progress = self.app.progress
+        self.buttons = [make_button(pygame.Rect(64, 36, 110, 38), "← Menu", self.app.go_menu)]
+        for index, item in enumerate(SHOP_ITEMS):
+            rect = pygame.Rect(PANEL.right - 150, 130 + index * ITEM_HEIGHT + 24, 120, 40)
+            label, color, action = self._button_for(item, progress)
+            self.buttons.append(make_button(rect, label, action, color))
+
+    def _button_for(self, item: ShopItem, progress: Any) -> tuple[str, tuple[int, int, int], Any]:
+        owned = item.price == 0 or item.id in progress.owned
+        if item.kind == "skin" and owned:
+            if progress.skin == item.id:
+                return "Đang dùng", (46, 120, 90), lambda: None
+            return "Dùng", (70, 80, 120), lambda item_id=item.id: self._equip(item_id)
+        if owned:
+            return "Đã có", (46, 120, 90), lambda: None
+        ok, _ = can_buy(progress, item)
+        color = (150, 110, 40) if ok else (64, 66, 86)
+        return f"Mua {item.price}", color, lambda chosen=item: self._buy(chosen)
+
+    def _buy(self, item: ShopItem) -> None:
+        ok, reason = can_buy(self.app.progress, item)
+        if not ok:
+            self.app.show_toast(f"Chưa mua được {item.name}: {reason}.")
+            self.app.sound.play("fail")
+            return
+        buy(self.app.progress, item)
+        self.app.progress.save()
+        self.app.sound.play("coin")
+        self.app.show_toast(f"Đã mua {item.name}!")
+        self.build()
+
+    def _equip(self, item_id: str) -> None:
+        equip_skin(self.app.progress, item_id)
+        self.app.progress.save()
+        self.app.sound.play("click")
+        self.build()
+
+    def handle_event(self, event: pygame.event.Event) -> None:
+        for button in self.buttons:
+            if button.handle_event(event):
+                return
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.app.go_menu()
+
+    # ------------------------------------------------------------ drawing
+    def draw(self, surface: pygame.Surface) -> None:
+        app = self.app
+        progress = app.progress
+        app.draw_background(5)
+        pygame.draw.rect(surface, (22, 24, 34), PANEL, border_radius=10)
+        pygame.draw.rect(surface, (60, 66, 92), PANEL, width=2, border_radius=10)
+
+        title = app.font_title.render("Bộ sưu tập & Cửa hàng", True, STORE_COLOR_ACCENT)
+        surface.blit(title, (196, 36))
+
+        stars = total_stars(progress)
+        max_stars = 3 * len(all_levels())
+        rank, next_threshold = rank_for(stars)
+        box = pygame.Rect(64, 96, SHOP_X - 90, 150)
+        pygame.draw.rect(surface, (30, 34, 50), box, border_radius=10)
+        surface.blit(app.font_bold.render(f"Cấp bậc: {rank}", True, STORE_COLOR_ACCENT), (box.x + 18, box.y + 14))
+        draw_star(surface, (box.x + 30, box.y + 66), 13, True)
+        surface.blit(app.font.render(f"{stars} / {max_stars} sao", True, STORE_COLOR_TEXT), (box.x + 52, box.y + 54))
+        draw_coin(surface, (box.x + 250, box.y + 66), 12)
+        surface.blit(app.font.render(f"{progress.coins} xu", True, STORE_COLOR_TEXT), (box.x + 270, box.y + 54))
+        bar = pygame.Rect(box.x + 18, box.y + 100, box.width - 36, 16)
+        pygame.draw.rect(surface, (50, 54, 72), bar, border_radius=8)
+        if next_threshold is None:
+            fill, caption = 1.0, "Cấp bậc cao nhất!"
+        else:
+            previous = max(threshold for threshold, _ in RANKS if threshold <= stars)
+            fill = (stars - previous) / max(1, next_threshold - previous)
+            caption = f"Còn {next_threshold - stars} sao để lên cấp tiếp theo"
+        pygame.draw.rect(surface, STORE_COLOR_GOOD, (bar.x, bar.y, int(bar.width * fill), bar.height), border_radius=8)
+        surface.blit(app.font_small.render(caption, True, STORE_COLOR_MUTED), (bar.x, bar.bottom + 4))
+
+        surface.blit(app.font_bold.render("Huy hiệu World", True, STORE_COLOR_ACCENT), (64, 262))
+        hint = app.font_small.render("Qua đủ 5 màn một World để mở rương và nhận huy hiệu.", True, STORE_COLOR_MUTED)
+        surface.blit(hint, (64, 288))
+        for index, world in enumerate(WORLDS):
+            column, row = index % 8, index // 8
+            center = (100 + column * 72, 360 + row * 104)
+            earned = world.number in progress.chests
+            draw_medal(surface, center, 26, str(world.number), app.font_bold, STAGE_COLORS[world.stage], earned)
+            name = app._fit_text(world.title, 68)
+            caption = app.font_small.render(name, True, STORE_COLOR_TEXT if earned else STORE_COLOR_MUTED)
+            surface.blit(caption, caption.get_rect(midtop=(center[0], center[1] + 32)))
+
+        surface.blit(app.font_bold.render("Cửa hàng", True, STORE_COLOR_ACCENT), (SHOP_X, 96))
+        for index, item in enumerate(SHOP_ITEMS):
+            row = pygame.Rect(SHOP_X, 130 + index * ITEM_HEIGHT, PANEL.right - SHOP_X - 20, ITEM_HEIGHT - 10)
+            pygame.draw.rect(surface, (30, 34, 50), row, border_radius=10)
+            icon_center = (row.x + 44, row.centery)
+            if item.kind == "skin":
+                frames = app.assets.hero_skin(item.skin_number)["idle"]
+                image = frames[int(app.time * 10) % len(frames)]
+                surface.blit(image, image.get_rect(center=icon_center))
+            elif item.kind == "heart":
+                draw_heart(surface, icon_center, 16, (255, 98, 98))
+            else:
+                draw_shield(surface, icon_center, 16)
+            surface.blit(app.font_bold.render(item.name, True, STORE_COLOR_TEXT), (row.x + 90, row.y + 14))
+            surface.blit(app.font_small.render(item.description, True, STORE_COLOR_MUTED), (row.x + 90, row.y + 44))
+
+        for button in self.buttons:
+            button.draw(surface, app.font_small if len(button.label) > 8 else app.font)
+        app.draw_toast()
 
 
 # ======================================================================
@@ -7433,6 +8102,7 @@ EVENT_DURATIONS: dict[str, float] = {
     "info": 0.2,
     "hurt": 0.4,
     "heal": 0.5,
+    "shield": 0.4,
     "gem": 0.05,
     "door_open": 0.3,
     "jam": 0.35,
@@ -7492,11 +8162,38 @@ class Button:
         surface.blit(label, label.get_rect(center=self.rect.center))
 
 
+class LevelButton(Button):
+    """Menu button for one level, showing the best stars earned."""
+
+    def __init__(self, rect: pygame.Rect, label: str, on_click: Callable[[], None],
+                 color: tuple[int, int, int], stars: int) -> None:
+        super().__init__(rect, label, on_click, color)
+        self.stars = stars
+
+    def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
+        hovered = self.rect.collidepoint(mouse_pos())
+        color = tuple(min(255, channel + 30) for channel in self.color) if hovered else self.color
+        pygame.draw.rect(surface, color, self.rect, border_radius=8)
+        pygame.draw.rect(surface, (255, 255, 255, 40), self.rect, width=1, border_radius=8)
+        label = font.render(self.label, True, COLOR_TEXT)
+        surface.blit(label, label.get_rect(center=(self.rect.centerx, self.rect.centery - 6)))
+        draw_star_row(surface, (self.rect.centerx, self.rect.bottom - 9), 5, self.stars)
+
+
 class Playback:
     """Replays recorded engine events as an animation."""
 
-    def __init__(self, level: Level) -> None:
+    def __init__(
+        self,
+        level: Level,
+        bonus_hp: int = 0,
+        shield: bool = False,
+        sound: Callable[[str], None] | None = None,
+    ) -> None:
         self.level = level
+        self.bonus_hp = bonus_hp
+        self.has_shield = shield and upgrades_apply(level)
+        self.sound = sound or (lambda name: None)
         self.terrain_world = World(level)
         self.events: list[dict[str, Any]] = []
         self.result: RunResult | None = None
@@ -7506,7 +8203,8 @@ class Playback:
         world = self.terrain_world
         self.hero_position = pygame.Vector2(world.hero_start)
         self.facing = "right"
-        self.hp = self.level.start_hp
+        self.hp, self.max_hp = hero_hp_limits(self.level, self.bonus_hp)
+        self.shield = self.has_shield
         self.gems = dict(world.gems)
         self.enemies = {pos: enemy.kind for pos, enemy in world.enemies.items()}
         self.doors = dict(world.doors)
@@ -7577,6 +8275,12 @@ class Playback:
         if kind == "move":
             self.facing = event["direction"]
             self._set_hero_state("run")
+            self.sound("step")
+        elif kind == "shield":
+            self.shield = False
+            self._float("Khiên!", COLOR_INFO, self.hero_position)
+            log(event["text"], COLOR_INFO)
+            self.sound("shield")
         elif kind == "bump":
             self.facing = event["direction"]
             self._set_hero_state("hit")
@@ -7586,6 +8290,7 @@ class Playback:
             target = tuple(event["target"])
             if event["hit"]:
                 self.enemy_flash[target] = 0.3
+                self.sound("hit")
         elif kind == "say":
             self.bubble = (event["text"], 2.2)
             log(f"Hero: {event['text']}", COLOR_ACCENT)
@@ -7598,6 +8303,7 @@ class Playback:
             self._set_hero_state("hit")
             self._float("-1 ♥", COLOR_BAD, self.hero_position)
             log(event["text"], COLOR_BAD)
+            self.sound("hurt")
         elif kind == "heal":
             self.hp = event["hp"]
             self._float(f"+{event['amount']} ♥", COLOR_GOOD, self.hero_position)
@@ -7606,9 +8312,11 @@ class Playback:
             position = tuple(event["pos"])
             self.gems.pop(position, None)
             self._float("+1", COLOR_ACCENT, pygame.Vector2(position))
+            self.sound("gem")
         elif kind == "door_open":
             self.doors.pop(tuple(event["pos"]), None)
             log("Cửa đã mở!", COLOR_GOOD)
+            self.sound("door")
         elif kind == "jam":
             self.door_shake[tuple(event["pos"])] = 0.35
             log("DoorJammed: cửa bị kẹt!", COLOR_BAD)
@@ -7712,11 +8420,16 @@ class App:
         self.assets = Assets()
         self.logo = load_logo(96)
         self.progress = Progress(PROGRESS_FILE, backup_dir())
+        self.sound = SoundBoard(self.progress.muted)
+        self.confetti = Confetti()
+        self.win_summary: RewardSummary | None = None
+        self.win_time = 0.0
+        self.store = StoreView(self)
         self.editor = CodeEditor(self.font_code, self.font_small)
         self.levels = all_levels()
         self.scene = "menu"
         self.level: Level = self.levels[0]
-        self.playback = Playback(self.level)
+        self.playback = self._new_playback(self.level)
         self.console: list[tuple[str, tuple[int, int, int]]] = []
         self.hint_index = 0
         self.speed_options = [1.0, 2.0, 4.0]
@@ -7729,10 +8442,8 @@ class App:
         self.play_buttons: list[Button] = []
         self.win_buttons: list[Button] = []
         self.menu_stage = self._first_unfinished_stage()
-        self.menu_tool_buttons = [
-            Button(pygame.Rect(1020, 30, 196, 36), "Sao lưu tiến độ", self.backup_progress, (46, 120, 90)),
-            Button(pygame.Rect(1020, 72, 196, 36), "Khôi phục tiến độ", self.restore_progress, (90, 80, 140)),
-        ]
+        self.menu_tool_buttons: list[Button] = []
+        self._build_tool_buttons()
         self.toast: tuple[str, float] | None = None
         if self.progress.restored_from_backup:
             self.show_toast("Đã tự khôi phục tiến độ từ bản sao lưu trong Documents.")
@@ -7748,6 +8459,42 @@ class App:
     @staticmethod
     def _stage_worlds(stage_number: int) -> list[Any]:
         return [world for world in WORLDS if world.stage == stage_number]
+
+    @staticmethod
+    def make_button(
+        rect: pygame.Rect, label: str, on_click: Callable[[], None], color: tuple[int, int, int] = (70, 80, 120)
+    ) -> Button:
+        return Button(rect, label, on_click, color)
+
+    def _upgrades(self) -> tuple[int, bool]:
+        return bonus_hp(self.progress), has_shield(self.progress)
+
+    def _new_playback(self, level: Level) -> Playback:
+        bonus_hp, shield = self._upgrades()
+        return Playback(level, bonus_hp, shield, self.sound.play)
+
+    def _build_tool_buttons(self) -> None:
+        sound_label = "Âm: Tắt" if self.sound.muted else "Âm: Bật"
+        self.menu_tool_buttons = [
+            Button(pygame.Rect(1020, 30, 196, 36), "Sao lưu tiến độ", self.backup_progress, (46, 120, 90)),
+            Button(pygame.Rect(1020, 72, 196, 36), "Khôi phục tiến độ", self.restore_progress, (90, 80, 140)),
+            Button(pygame.Rect(812, 30, 196, 36), "Cửa hàng & Huy hiệu", self.open_store, (170, 120, 40)),
+            Button(pygame.Rect(812, 72, 96, 36), sound_label, self.toggle_sound, (70, 80, 120)),
+        ]
+
+    def toggle_sound(self) -> None:
+        self.sound.muted = not self.sound.muted
+        self.progress.muted = self.sound.muted
+        self.progress.save()
+        self._build_tool_buttons()
+        self._build_play_buttons()
+        self.sound.play("click")
+
+    def open_store(self) -> None:
+        self.save_code()
+        self.scene = "store"
+        self.store.build()
+        self.sound.play("click")
 
     def select_stage(self, stage_number: int) -> None:
         self.menu_stage = stage_number
@@ -7796,11 +8543,12 @@ class App:
             cell_x, cell_y = self._world_cell(world_index)
             for level_index, level in enumerate(world.levels):
                 rect = pygame.Rect(
-                    cell_x + MENU_LEVELS_OFFSET + level_index * (MENU_LEVEL_WIDTH + 6), cell_y + 6, MENU_LEVEL_WIDTH, 40
+                    cell_x + MENU_LEVELS_OFFSET + level_index * (MENU_LEVEL_WIDTH + 6), cell_y + 2, MENU_LEVEL_WIDTH, 50
                 )
                 done = level.id in self.progress.completed
                 color = (46, 140, 86) if done else (70, 80, 120)
-                self.menu_buttons.append(Button(rect, level.id, lambda lv=level: self.open_level(lv), color))
+                stars = self.progress.stars.get(level.id, 0)
+                self.menu_buttons.append(LevelButton(rect, level.id, lambda lv=level: self.open_level(lv), color, stars))
 
     @staticmethod
     def _world_cell(world_index: int) -> tuple[int, int]:
@@ -7825,12 +8573,15 @@ class App:
             rect = pygame.Rect(x + index * (width + gap), BUTTON_Y, width, 48)
             self.play_buttons.append(Button(rect, label, callback, color))
         self.play_buttons.append(Button(pygame.Rect(16, 14, 100, 36), "← Menu", self.go_menu))
+        sound_label = "Âm: Tắt" if self.sound.muted else "Âm: Bật"
+        self.play_buttons.append(Button(pygame.Rect(1160, 14, 104, 36), sound_label, self.toggle_sound))
 
     def open_level(self, level: Level) -> None:
         self.save_code()
         self.level = level
         self.scene = "play"
-        self.playback = Playback(level)
+        self.playback = self._new_playback(level)
+        self.win_summary = None
         self.editor.set_text(self.progress.code.get(level.id, level.starter))
         self.editor.extra_names = list(level.extra_globals)
         self.editor.focused = True
@@ -7881,7 +8632,8 @@ class App:
         self.show_win = False
         self.console = []
         self.log("Đang chạy...", COLOR_MUTED)
-        result = run_code(self.level, self.editor.text)
+        bonus_hp, shield = self._upgrades()
+        result = run_code(self.level, self.editor.text, bonus_hp, shield)
         self.editor.error_line = result.error_line
         self.playback.start(result)
 
@@ -7918,19 +8670,33 @@ class App:
             return
         if result.won:
             self.log("[OK] " + result.message, COLOR_GOOD)
-            self.progress.completed.add(self.level.id)
+            world = world_of(self.level.id)
+            flags = star_flags(result, self.level.id)
+            summary = apply_win(self.progress, self.level, world.levels, world.number, flags)
             self.progress.save()
+            self.win_summary = summary
+            self.win_time = 0.0
+            if not flags[1]:
+                self.log(f"Sao 2: hãy thử qua màn mà không mất máu (vừa mất {result.damage_taken}).", COLOR_INFO)
+            if not flags[2]:
+                limit = par_for(self.level.id)
+                self.log(f"Sao 3: code đang có {result.code_lines} dòng - thử rút gọn còn tối đa {limit} dòng.", COLOR_INFO)
+            if summary.coins:
+                self.log(f"Nhận {summary.coins} xu!", COLOR_ACCENT)
+            self.sound.play("chest" if summary.chest_world else "win")
+            self.confetti.burst(VIEW_RECT, 140 if summary.chest_world else 90)
             self.show_win = True
-            center = pygame.Rect(0, 0, 160, 46)
-            center.center = (VIEW_RECT.centerx - 90, VIEW_RECT.centery + 50)
-            next_rect = center.copy()
+            stay = pygame.Rect(0, 0, 160, 44)
+            stay.center = (VIEW_RECT.centerx - 90, VIEW_RECT.centery + 124)
+            next_rect = stay.copy()
             next_rect.centerx = VIEW_RECT.centerx + 90
             self.win_buttons = [
-                Button(center, "Ở lại", self.close_win),
+                Button(stay, "Ở lại", self.close_win),
                 Button(next_rect, "Màn tiếp →", self.next_level, (46, 140, 86)),
             ]
         else:
             self.log("[Lỗi] " + result.message, COLOR_BAD)
+            self.sound.play("fail")
 
     def close_win(self) -> None:
         self.show_win = False
@@ -7953,6 +8719,9 @@ class App:
         pygame.quit()
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if self.scene == "store":
+            self.store.handle_event(event)
+            return
         if self.scene == "menu":
             for button in [*self.menu_buttons, *self.menu_tool_buttons]:
                 if button.handle_event(event):
@@ -7991,6 +8760,8 @@ class App:
         self.editor.handle_event(event)
 
     def update(self, delta_seconds: float) -> None:
+        self.confetti.update(delta_seconds)
+        self.win_time += delta_seconds
         if self.toast is not None:
             text, remaining = self.toast
             self.toast = (text, remaining - delta_seconds) if remaining > delta_seconds else None
@@ -8013,7 +8784,9 @@ class App:
         self.screen.blit(shade, (0, 0))
 
     def draw(self) -> None:
-        if self.scene == "menu":
+        if self.scene == "store":
+            self.store.draw(self.screen)
+        elif self.scene == "menu":
             self.draw_menu()
         else:
             self.draw_play()
@@ -8027,12 +8800,19 @@ class App:
             text_left = MENU_LEFT + self.logo.get_width() + 6
         title = self.font_title.render("OneSpace CodeQuest · Python", True, COLOR_ACCENT)
         self.screen.blit(title, (text_left, 34))
-        subtitle = self.font.render(
-            "Viết code Python để đưa nhân vật vượt màn - 5 giai đoạn từ nền tảng tới nâng cao. Cho học sinh THCS - THPT.",
-            True,
-            COLOR_MUTED,
-        )
-        self.screen.blit(subtitle, (text_left + 2, 80))
+        stars = total_stars(self.progress)
+        rank = rank_for(stars)[0]
+        draw_star(self.screen, (text_left + 12, 92), 11, True)
+        stats = self.font.render(f"{stars}/{3 * len(self.levels)} sao", True, COLOR_TEXT)
+        self.screen.blit(stats, (text_left + 30, 80))
+        coin_x = text_left + 50 + stats.get_width()
+        draw_coin(self.screen, (coin_x, 92), 10)
+        coins = self.font.render(f"{self.progress.coins} xu", True, COLOR_TEXT)
+        self.screen.blit(coins, (coin_x + 16, 80))
+        rank_text = self.font.render(f"Cấp bậc: {rank}", True, COLOR_ACCENT)
+        self.screen.blit(rank_text, (coin_x + 40 + coins.get_width(), 80))
+        for button in self.menu_tool_buttons:
+            button.draw(self.screen, self.font_small)
 
         for button in self.menu_buttons[: len(STAGES)]:
             button.draw(self.screen, self.font)
@@ -8062,8 +8842,6 @@ class App:
 
         for button in self.menu_buttons[len(STAGES):]:
             button.draw(self.screen, self.font)
-        for button in self.menu_tool_buttons:
-            button.draw(self.screen, self.font_small)
         self.draw_toast()
 
     def draw_toast(self) -> None:
@@ -8100,8 +8878,10 @@ class App:
         draw_panel(self.screen, VIEW_RECT, alpha=150)
         self.draw_map()
         self.draw_hearts()
+        self.draw_star_goals()
         if self.show_win:
             self.draw_win()
+        self.confetti.draw(self.screen, VIEW_RECT)
 
         draw_panel(self.screen, CONSOLE_RECT)
         self.draw_console()
@@ -8175,7 +8955,7 @@ class App:
             image.set_alpha(int(255 * remaining / 0.5))
             self._blit_on_tile(image, x, y, flip=kind != "duck")
 
-        hero_frames = self.assets.hero[playback.hero_state]
+        hero_frames = self.assets.hero_skin(skin_number(self.progress))[playback.hero_state]
         hero_image = self._frame(hero_frames, 16, playback.hero_state_time)
         if playback.dead:
             hero_image = hero_image.copy()
@@ -8213,27 +8993,73 @@ class App:
             self.screen.blit(rendered, (rect.x + 10, rect.y + 6 + index * 20))
 
     def draw_hearts(self) -> None:
-        for index in range(MAX_HERO_HP):
+        for index in range(self.playback.max_hp):
             color = COLOR_BAD if index < self.playback.hp else (70, 70, 90)
             heart = self.font_bold.render("♥", True, color)
             self.screen.blit(heart, (VIEW_RECT.x + 12 + index * 24, VIEW_RECT.y + 8))
+        if self.playback.shield:
+            draw_shield(self.screen, (VIEW_RECT.x + 24 + self.playback.max_hp * 24, VIEW_RECT.y + 20), 8)
         collected = len(self.playback.terrain_world.gems) - len(self.playback.gems)
         total = len(self.playback.terrain_world.gems)
         if total:
             gem_text = self.font_bold.render(f"Ngọc: {collected}/{total}", True, COLOR_ACCENT)
             self.screen.blit(gem_text, (VIEW_RECT.right - gem_text.get_width() - 14, VIEW_RECT.y + 8))
 
+    def draw_star_goals(self) -> None:
+        best = self.progress.stars.get(self.level.id, 0)
+        goals = star_goals(self.level.id)
+        pieces = [(self.font_small.render(text, True, COLOR_TEXT if index < best else COLOR_MUTED), index < best)
+                  for index, text in enumerate(goals)]
+        total_width = sum(image.get_width() + 26 for image, _ in pieces) + 12 * (len(pieces) - 1)
+        x = VIEW_RECT.centerx - total_width // 2
+        for image, achieved in pieces:
+            draw_star(self.screen, (x + 9, VIEW_RECT.y + 20), 8, achieved)
+            self.screen.blit(image, (x + 22, VIEW_RECT.y + 11))
+            x += image.get_width() + 38
+
     def draw_win(self) -> None:
+        summary = self.win_summary
         overlay = pygame.Surface(VIEW_RECT.size, pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 140))
+        overlay.fill((0, 0, 0, 150))
         self.screen.blit(overlay, VIEW_RECT.topleft)
-        panel = pygame.Rect(0, 0, 420, 190)
+        panel = pygame.Rect(0, 0, 470, 330)
         panel.center = VIEW_RECT.center
         draw_panel(self.screen, panel, alpha=245)
         title = self.font_title.render("Hoàn thành!", True, COLOR_GOOD)
-        self.screen.blit(title, title.get_rect(center=(panel.centerx, panel.y + 40)))
-        sub = self.font.render(f"Bạn đã vượt qua màn {self.level.id}.", True, COLOR_TEXT)
-        self.screen.blit(sub, sub.get_rect(center=(panel.centerx, panel.y + 80)))
+        self.screen.blit(title, title.get_rect(center=(panel.centerx, panel.y + 32)))
+        if summary is None:
+            for button in self.win_buttons:
+                button.draw(self.screen, self.font)
+            return
+
+        for index, achieved in enumerate(summary.stars):
+            appear = min(1.0, max(0.0, (self.win_time - 0.25 * index) * 4))
+            radius = 24 * (appear * (1.25 - 0.25 * appear)) if achieved else 22
+            if achieved and appear <= 0:
+                radius = 0
+            center = (panel.centerx + (index - 1) * 62, panel.y + 84)
+            if radius > 0:
+                draw_star(self.screen, center, radius, achieved)
+
+        y = panel.y + 122
+        for achieved, text in zip(summary.stars, star_goals(self.level.id), strict=True):
+            draw_star(self.screen, (panel.x + 46, y + 10), 8, achieved)
+            color = COLOR_TEXT if achieved else COLOR_MUTED
+            self.screen.blit(self.font_small.render(text, True, color), (panel.x + 62, y))
+            y += 24
+
+        draw_coin(self.screen, (panel.x + 48, y + 16), 11)
+        coin_text = f"+{summary.coins} xu" if summary.coins else "Không có xu mới (đã nhận ở lần trước)"
+        self.screen.blit(self.font_bold.render(coin_text, True, COLOR_ACCENT), (panel.x + 66, y + 4))
+        y += 34
+        if summary.chest_world is not None:
+            world = WORLDS[summary.chest_world - 1]
+            text = f"Mở rương World {world.number} · {world.title}: huy hiệu + {WORLD_CHEST_COINS} xu!"
+            self.screen.blit(self.font_small.render(text, True, COLOR_GOOD), (panel.x + 30, y))
+            y += 22
+        if summary.rank_up:
+            text = f"Lên cấp bậc mới: {summary.new_rank}!"
+            self.screen.blit(self.font_small.render(text, True, COLOR_INFO), (panel.x + 30, y))
         for button in self.win_buttons:
             button.draw(self.screen, self.font)
 

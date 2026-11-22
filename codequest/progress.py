@@ -14,7 +14,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+# Xu thưởng cho mỗi sao (giữ giống rewards.STAR_COINS).
+STAR_COINS = 10
 BACKUP_NAME = "tien-do.json"
 
 
@@ -41,6 +43,12 @@ class Progress:
         self.backup_dir = backup_dir
         self.completed: set[str] = set()
         self.code: dict[str, str] = {}
+        self.stars: dict[str, int] = {}
+        self.coins = 0
+        self.owned: set[str] = set()
+        self.skin = "skin1"
+        self.chests: set[int] = set()
+        self.muted = False
         self.restored_from_backup = False
         self._load()
 
@@ -66,7 +74,26 @@ class Progress:
         for level_id, text in dict(data.get("code", {})).items():
             if isinstance(text, str) and level_id not in self.code:
                 self.code[str(level_id)] = text
+        for level_id, count in dict(data.get("stars", {})).items():
+            if isinstance(count, int):
+                self.stars[str(level_id)] = max(self.stars.get(str(level_id), 0), min(3, count))
+        if isinstance(data.get("coins"), int):
+            self.coins = max(self.coins, data["coins"])
+        self.owned |= {str(item) for item in data.get("owned", [])}
+        self.chests |= {int(world) for world in data.get("chests", []) if str(world).isdigit()}
+        if self.skin == "skin1" and isinstance(data.get("skin"), str):
+            self.skin = data["skin"]
+        if isinstance(data.get("muted"), bool):
+            self.muted = data["muted"]
+        self._migrate_old_wins()
         return len(self.completed) - before
+
+    def _migrate_old_wins(self) -> None:
+        """Levels finished in versions before stars existed count as 1 star (and its coins)."""
+        for level_id in self.completed:
+            if level_id not in self.stars:
+                self.stars[level_id] = 1
+                self.coins += STAR_COINS
 
     # ------------------------------------------------------------ saving
     def to_json(self) -> str:
@@ -76,6 +103,12 @@ class Progress:
             "saved_at": datetime.now().isoformat(timespec="seconds"),
             "completed": sorted(self.completed),
             "code": self.code,
+            "stars": self.stars,
+            "coins": self.coins,
+            "owned": sorted(self.owned),
+            "skin": self.skin,
+            "chests": sorted(self.chests),
+            "muted": self.muted,
         }
         return json.dumps(data, ensure_ascii=False, indent=2)
 

@@ -110,14 +110,9 @@ class Assets:
         self.door_locked = self._tile(tileset, 13, 5)
         self.door_jammed = self._tile(tileset, 6, 8)
 
-        hero_dir = f"1 Main Characters/{hero_skin}"
         hero_scale = TILE / 32 * 1.25
-        self.hero = {
-            "idle": strip(f"{hero_dir}/Idle.png", 32, hero_scale),
-            "run": strip(f"{hero_dir}/Run.png", 32, hero_scale),
-            "hit": strip(f"{hero_dir}/Hit.png", 32, hero_scale),
-            "jump": strip(f"{hero_dir}/Jump.png", 32, hero_scale),
-        }
+        self._hero_skins: dict[int, dict[str, list[pygame.Surface]]] = {}
+        self.hero = self.hero_skin(hero_skin)
         self.appearing = strip("1 Main Characters/Appearing.png", 96, hero_scale)
 
         self.enemies: dict[str, dict[str, list[pygame.Surface]]] = {}
@@ -135,6 +130,19 @@ class Assets:
             index: pygame.transform.scale(load_image(f"2 Locations/Backgrounds/{index}.png"), (128, 128))
             for index in range(1, 7)
         }
+
+    def hero_skin(self, number: int) -> dict[str, list[pygame.Surface]]:
+        """Animation frames for character 1, 2 or 3 (loaded once, then cached)."""
+        if number not in self._hero_skins:
+            hero_dir = f"1 Main Characters/{number}"
+            scale = TILE / 32 * 1.25
+            self._hero_skins[number] = {
+                "idle": strip(f"{hero_dir}/Idle.png", 32, scale),
+                "run": strip(f"{hero_dir}/Run.png", 32, scale),
+                "hit": strip(f"{hero_dir}/Hit.png", 32, scale),
+                "jump": strip(f"{hero_dir}/Jump.png", 32, scale),
+            }
+        return self._hero_skins[number]
 
     @staticmethod
     def _tile(tileset: pygame.Surface, column: int, row: int) -> pygame.Surface:

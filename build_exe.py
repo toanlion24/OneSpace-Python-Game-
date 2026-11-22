@@ -62,6 +62,11 @@ CÁCH CHƠI
   chỉ có tác dụng trong dấu nháy "..." và ghi chú #.
   Nên TẮT Unikey/EVKey khi chơi để tránh gõ chồng.
 
+PHẦN THƯỞNG
+- Mỗi màn 3 sao: qua màn, không mất máu, code gọn (không vượt số dòng cho phép).
+- Sao mới đổi ra xu. Qua đủ 5 màn một World: mở rương, nhận huy hiệu và xu.
+- Menu > "Cửa hàng & Huy hiệu": mua nhân vật, Tim thêm, Khiên gỗ; xem huy hiệu và cấp bậc.
+
 KHUNG CODE
 - Gõ vài chữ đầu sẽ hiện gợi ý lệnh: Tab hoặc Enter để chọn, Esc để đóng, Ctrl+Space để mở lại.
 - Bôi đen bằng chuột hoặc Shift + mũi tên. Ctrl+A chọn hết, Ctrl+C / Ctrl+X / Ctrl+V copy - cắt - dán,

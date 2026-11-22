@@ -100,12 +100,31 @@ class RunResult:
     won: bool
     message: str
     error_line: int | None = None
+    damage_taken: int = 0
+    code_lines: int = 0
+
+
+def upgrades_apply(level: Level) -> bool:
+    """Shop upgrades (extra hearts, shield) are off in levels that are about healing."""
+    return not level.need_full_hp and level.start_hp == MAX_HERO_HP
+
+
+def hero_hp_limits(level: Level, bonus_hp: int = 0) -> tuple[int, int]:
+    """(starting hp, maximum hp) for a level, including shop upgrades when they apply."""
+    if not upgrades_apply(level):
+        return level.start_hp, MAX_HERO_HP
+    return MAX_HERO_HP + bonus_hp, MAX_HERO_HP + bonus_hp
+
+
+def count_code_lines(source: str) -> int:
+    """Lines that contain code (blank lines and comment-only lines do not count)."""
+    return sum(1 for line in source.split("\n") if line.strip() and not line.strip().startswith("#"))
 
 
 class World:
     """Rules and state of one level."""
 
-    def __init__(self, level: Level) -> None:
+    def __init__(self, level: Level, bonus_hp: int = 0, shield: bool = False) -> None:
         self.level = level
         self.rows = level.rows
         self.height = len(level.rows)
@@ -121,7 +140,9 @@ class World:
 
         self.hero_x, self.hero_y = self.hero_start
         self.facing = "right"
-        self.hp = level.start_hp
+        self.hp, self.max_hp = hero_hp_limits(level, bonus_hp)
+        self.shield = shield and upgrades_apply(level)
+        self.damage_taken = 0
         self.gems_collected = 0
         self.events: list[dict[str, Any]] = []
         self.messages: list[str] = []
@@ -188,6 +209,11 @@ class World:
         return direction
 
     def hurt(self, reason: str) -> None:
+        if self.shield:
+            self.shield = False
+            self.emit("shield", text=f"Khiên đỡ đòn! ({reason})")
+            return
+        self.damage_taken += 1
         self.hp -= 1
         self.emit("hurt", hp=self.hp, text=reason)
         if self.hp <= 0:
@@ -314,7 +340,7 @@ class World:
         if isinstance(power, bool) or not isinstance(power, int):
             raise TypeError("Vật phẩm cần có thuộc tính power là số nguyên (ví dụ self.power = 2).")
         self.count_action()
-        healed = max(0, min(MAX_HERO_HP, self.hp + power) - self.hp)
+        healed = max(0, min(self.max_hp, self.hp + power) - self.hp)
         self.hp += healed
         self.emit("heal", hp=self.hp, amount=healed)
 
@@ -795,15 +821,16 @@ def explain_syntax_error(exc: SyntaxError) -> str:
     return f"Dòng {line}: Sai cú pháp ({exc.msg}). Kiểm tra dấu ngoặc, dấu hai chấm, dấu nháy."
 
 
-def run_code(level: Level, source: str) -> RunResult:
+def run_code(level: Level, source: str, bonus_hp: int = 0, shield: bool = False) -> RunResult:
     """Run the player's code against a fresh world and judge the outcome."""
-    world = World(level)
+    world = World(level, bonus_hp, shield)
+    lines = count_code_lines(source)
 
     try:
         tree = ast.parse(source, CODE_FILENAME)
         code = compile(tree, CODE_FILENAME, "exec")
     except SyntaxError as exc:
-        return RunResult([], False, explain_syntax_error(exc), exc.lineno)
+        return RunResult([], False, explain_syntax_error(exc), exc.lineno, 0, lines)
 
     namespace: dict[str, Any] = {
         "__builtins__": _safe_builtins(world),
@@ -846,12 +873,12 @@ def run_code(level: Level, source: str) -> RunResult:
         sys.settrace(old_trace)
 
     if error_message is not None:
-        return RunResult(world.events, False, error_message, error_line)
+        return RunResult(world.events, False, error_message, error_line, world.damage_taken, lines)
 
     problem = _judge(world, tree, level)
     if problem:
-        return RunResult(world.events, False, problem)
-    return RunResult(world.events, True, "Hoàn thành màn chơi!")
+        return RunResult(world.events, False, problem, None, world.damage_taken, lines)
+    return RunResult(world.events, True, "Hoàn thành màn chơi!", None, world.damage_taken, lines)
 
 
 def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
@@ -859,8 +886,8 @@ def _judge(world: World, tree: ast.AST, level: Level) -> str | None:
         return "Hero chưa tới cổng (cúp vàng). Hãy kiểm tra lại các bước đi."
     if world.gems:
         return f"Còn {len(world.gems)} viên ngọc chưa nhặt."
-    if level.need_full_hp and world.hp < MAX_HERO_HP:
-        return f"Hero mới có {world.hp}/{MAX_HERO_HP} máu - cần hồi đầy máu trước khi tới cúp."
+    if level.need_full_hp and world.hp < world.max_hp:
+        return f"Hero mới có {world.hp}/{world.max_hp} máu - cần hồi đầy máu trước khi tới cúp."
     if level.kill_all and world.enemies:
         return f"Còn {len(world.enemies)} quái chưa bị hạ."
     if level.say_contains is not None:
