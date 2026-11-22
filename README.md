@@ -17,8 +17,8 @@ Mỗi màn là một thử thách nhỏ: học sinh viết code Python thật đ
 - **Tự suy nghĩ**: game không hiện lời giải; nút Gợi ý chỉ gợi hướng.
 - **Bản đồ kiểm tra ẩn**: nhiều màn chạy thêm code trên bản đồ dài hơn hoặc dữ liệu khác;
   code "gõ cứng" (đếm ô, gõ thẳng đáp án) sẽ bị phát hiện, và game diễn lại bản đồ ẩn để em thấy sai ở đâu.
-- **Thân thiện với học sinh Việt Nam**: lời giải thích bằng tiếng Việt, bộ gõ Telex có sẵn
-  (chỉ hoạt động trong dấu nháy và ghi chú nên không làm hỏng code).
+- **Thân thiện với học sinh Việt Nam**: lời giải thích bằng tiếng Việt; gõ tiếng Việt bằng Unikey / EVKey
+  như bình thường (giao diện cũ có bộ gõ Telex riêng).
 - **Khung code dễ dùng**: gõ vài chữ đầu là hiện **gợi ý lệnh** kèm giải thích (Tab / Enter để chọn,
   Ctrl+Space để mở lại); bôi đen bằng chuột hoặc Shift + mũi tên; Ctrl+A / C / X / V / Z;
   Tab thụt lề cả đoạn đã chọn.
@@ -73,6 +73,11 @@ và sẵn sàng học tiếp khoa học dữ liệu, AI hoặc giải thuật.
 pip install -r requirements.txt
 python main.py
 ```
+
+Từ v2.0 game mở **giao diện web** trong cửa sổ dùng Microsoft Edge WebView2 (có sẵn trên Windows 10/11).
+Giao diện viết bằng HTML/CSS/JS trong `webui/`; chấm code, sao, xu, cửa hàng, nhạc và tiến độ vẫn do Python
+(`codequest/web_api.py`) làm. Máy thiếu WebView2 thì tự mở giao diện pygame cũ; `python main.py --classic` để chọn
+giao diện cũ. `python -m codequest.web_app --browser` mở bằng trình duyệt thường để phát triển.
 
 > **Đồ hoạ**: game dùng bộ [Free Simple Platformer Game Kit](https://craftpix.net/freebies/free-simple-platformer-game-kit-pixel-art/)
 > của CraftPix.net. Giấy phép của CraftPix không cho phát tán lại file gốc, nên repo này không chứa thư mục `gamekit/`.
@@ -143,6 +148,9 @@ codequest/hud.py          Vẽ sao, xu, huy hiệu, pháo giấy
 codequest/sound.py        Âm thanh tạo bằng code
 codequest/telex.py        Bộ gõ tiếng Việt Telex
 codequest/theory_view.py  Khung lý thuyết cuộn được, chọn và chép được
+codequest/web_api.py      Cầu nối Python cho giao diện web (chấm code, cửa hàng, nhạc, tiến độ)
+codequest/web_app.py      Máy chủ nội bộ + cửa sổ WebView2
+webui/                    Giao diện web: app.js (màn hình), map.js (bản đồ), editor.js (khung code), audio.js
 codequest/display.py      Co giãn khung hình theo cửa sổ
 codequest/assets.py       Nạp đồ hoạ và logo
 codequest/selftest.py     Tự kiểm tra mọi màn (cần lời giải riêng của giáo viên)

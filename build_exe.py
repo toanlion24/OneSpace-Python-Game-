@@ -63,16 +63,14 @@ CÁCH CHƠI
 - Gợi ý: gợi hướng suy nghĩ khi bị bí.
 - Bản đồ kiểm tra ẩn: nhiều màn thử code của bạn trên một bản đồ dài hơn hoặc dữ liệu khác.
   Đừng đếm ô hay gõ thẳng đáp án - hãy viết code tính từ bản đồ và từ biến.
-- Gõ tiếng Việt: dùng bộ gõ Telex có sẵn trong game (F2 bật/tắt),
-  chỉ có tác dụng trong dấu nháy "..." và ghi chú #.
-  Nên TẮT Unikey/EVKey khi chơi để tránh gõ chồng.
+- Gõ tiếng Việt: dùng Unikey / EVKey / bộ gõ của Windows như bình thường.
 
 PHẦN THƯỞNG
 - Mỗi màn 3 sao: qua màn, không mất máu, code gọn (không vượt số dòng cho phép).
 - Sao mới đổi ra xu. Qua hết các màn một World: mở rương, nhận huy hiệu và xu.
 - Trong màn có thùng gỗ (đập bằng hero.attack), chìa khoá + cửa khoá (hero.unlock)
   và rương báu (hero.open_chest) - mỗi rương mở được thêm xu.
-- Lần đầu mở game: chọn 1 trong 12 nhân vật miễn phí (đổi lại bằng nút "Nhân vật" ở menu).
+- Lần đầu mở game: chọn 1 trong 12 nhân vật miễn phí (đổi lại bằng cách bấm vào nhân vật ở góc menu).
 - Menu > "Cửa hàng & Huy hiệu": mua nhân vật hiếm, Tim thêm, Khiên gỗ; xem huy hiệu và cấp bậc.
 - Mỗi World có kiểu bản đồ riêng: sân gạch, rừng rêu, sa mạc, băng tuyết, hang đêm...
 - Nút "Nhạc": chỉnh âm lượng nhạc / hiệu ứng theo % và chọn bài (Lo-fi, 8-bit, Ambient, Jazz,
@@ -81,7 +79,12 @@ PHẦN THƯỞNG
 KHUNG CODE
 - Gõ vài chữ đầu sẽ hiện gợi ý lệnh: Tab hoặc Enter để chọn, Esc để đóng, Ctrl+Space để mở lại.
 - Bôi đen bằng chuột hoặc Shift + mũi tên. Ctrl+A chọn hết, Ctrl+C / Ctrl+X / Ctrl+V copy - cắt - dán,
-  Ctrl+Z hoàn tác. Tab / Shift+Tab thụt lề cả đoạn đã chọn.
+  Ctrl+Z hoàn tác. Tab / Shift+Tab thụt lề cả đoạn đã chọn, Ctrl+/ bật tắt ghi chú.
+
+GIAO DIỆN
+- Game dùng giao diện mới chạy bằng Microsoft Edge WebView2 (có sẵn trên Windows 10/11).
+- Máy thiếu WebView2 thì game tự mở giao diện cũ. Muốn luôn dùng giao diện cũ: chạy
+  OneSpace-CodeQuest.exe --classic
 
 LƯU TIẾN ĐỘ (không mất khi cài lại game)
 - Tự lưu vào: %APPDATA%\\OneSpaceCodeQuest\\progress.json
@@ -128,6 +131,8 @@ def run_pyinstaller(icon_path: Path) -> None:
         "--icon", str(icon_path),
         "--add-data", f"{STAGING_KIT}{separator}gamekit",
         "--add-data", f"{ROOT / 'assets'}{separator}assets",
+        "--add-data", f"{ROOT / 'webui'}{separator}webui",
+        "--collect-submodules", "webview",
         *hidden_imports,
         "--distpath", str(DIST_DIR),
         "--workpath", str(BUILD_DIR / "pyinstaller"),
